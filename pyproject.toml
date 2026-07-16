@@ -1,0 +1,11 @@
+[tool.pytest.ini_options]
+# The test suite uses @pytest.mark.anyio (not pytest.mark.asyncio — see
+# CLAUDE.md's "Running Tests" note: this environment has anyio but not
+# pytest-asyncio). The actual backend restriction (asyncio only) lives in
+# tests/conftest.py's anyio_backend fixture override, not here — anyio's
+# pytest plugin has no ini-option for it, only that fixture. This section
+# just declares the marker explicitly so `pytest --strict-markers` (good
+# practice, catches typo'd marker names) wouldn't reject it as unknown.
+markers = [
+    "anyio: mark a test as an anyio coroutine test (asyncio backend only — see tests/conftest.py)",
+]

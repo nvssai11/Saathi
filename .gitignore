@@ -1,0 +1,27 @@
+# Environment
+.env
+.env.local
+
+docs/
+
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+*.egg-info/
+
+# Uploads (defect photos — local filesystem storage in v0)
+uploads/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/tsconfig.tsbuildinfo
+
+# Editor/OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
