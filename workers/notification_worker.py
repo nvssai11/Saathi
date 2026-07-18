@@ -26,6 +26,7 @@ class NotificationWorker:
             auto_offset_reset=settings.kafka_auto_offset_reset,
             enable_auto_commit=False,
             value_deserializer=lambda m: json.loads(m.decode("utf-8")),
+            **settings.kafka_client_kwargs,
         )
         await consumer.start()
         logger.info("NotificationWorker consumer started")

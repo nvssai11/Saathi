@@ -2,6 +2,7 @@ import json
 from decimal import Decimal
 from pydantic_settings import BaseSettings
 from pydantic import Field
+from aiokafka.helpers import create_ssl_context
 
 
 class Settings(BaseSettings):
@@ -9,6 +10,16 @@ class Settings(BaseSettings):
     db_pool_min_size: int = 5
     db_pool_max_size: int = 20
     kafka_bootstrap_servers: str = "localhost:9092"
+    # Aiven (or any managed Kafka) deployment: set kafka_security_protocol to
+    # "SASL_SSL", fill kafka_sasl_username/password + kafka_ssl_cafile (the
+    # service's CA cert, e.g. ca.pem downloaded from the Aiven console) in
+    # .env. Local Docker Compose Kafka stays PLAINTEXT — no other code changes
+    # needed either way, see Settings.kafka_client_kwargs below.
+    kafka_security_protocol: str = "PLAINTEXT"
+    kafka_sasl_mechanism: str = "PLAIN"
+    kafka_sasl_username: str = ""
+    kafka_sasl_password: str = ""
+    kafka_ssl_cafile: str = ""
     kafka_topic_order_placed: str = "saathi.order.placed"
     kafka_topic_sublot_delivered: str = "saathi.sublot.delivered"
     kafka_topic_sublot_assigned: str = "saathi.sublot.assigned"
@@ -53,6 +64,24 @@ class Settings(BaseSettings):
     @property
     def workshop_tokens(self) -> dict[str, int]:
         return json.loads(self.workshop_tokens_json)
+
+    @property
+    def kafka_client_kwargs(self) -> dict:
+        """Extra kwargs to spread into every AIOKafkaProducer/Consumer call.
+
+        Centralized so the four call sites (producer + 3 workers) don't each
+        duplicate SASL/SSL setup and can't drift out of sync.
+        """
+        kwargs: dict = {"security_protocol": self.kafka_security_protocol}
+        if self.kafka_security_protocol in ("SSL", "SASL_SSL"):
+            kwargs["ssl_context"] = create_ssl_context(
+                cafile=self.kafka_ssl_cafile or None
+            )
+        if self.kafka_security_protocol in ("SASL_SSL", "SASL_PLAINTEXT"):
+            kwargs["sasl_mechanism"] = self.kafka_sasl_mechanism
+            kwargs["sasl_plain_username"] = self.kafka_sasl_username
+            kwargs["sasl_plain_password"] = self.kafka_sasl_password
+        return kwargs
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
