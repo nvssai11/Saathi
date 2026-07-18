@@ -1,3 +1,5 @@
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
+
 export class ApiError extends Error {
   status: number;
   code?: string;
@@ -28,7 +30,7 @@ async function request<T>(
   options: RequestInit & { token?: string } = {}
 ): Promise<T> {
   const { token, headers, ...rest } = options;
-  const res = await fetch(path, {
+  const res = await fetch(API_BASE_URL + path, {
     ...rest,
     headers: {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -63,7 +65,7 @@ function uploadWithProgress<T>(
 ): Promise<T> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", path);
+    xhr.open("POST", API_BASE_URL + path);
     xhr.setRequestHeader("Authorization", `Bearer ${token}`);
     xhr.timeout = timeoutMs;
 
