@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../../context/AuthContext";
-import { buyerApi } from "../../api/client";
+import { buyerApi, PaymentTerms } from "../../api/client";
 import Layout from "../../components/Layout";
 import BulkOrderSheet from "../../components/BulkOrderSheet";
 import {
@@ -86,7 +86,13 @@ export default function PlaceOrder() {
     return sorted;
   }, [categories, priceBuckets, sort, query]);
 
-  async function handleSubmit(args: { totalQty: number; qualityMin: number; deadline: string; buyerRef: string }) {
+  async function handleSubmit(args: {
+    totalQty: number;
+    qualityMin: number;
+    deadline: string;
+    buyerRef: string;
+    paymentTerms: PaymentTerms;
+  }) {
     if (!token || !selected) return;
     const res = await buyerApi.placeOrder(token, {
       buyer_ref: args.buyerRef,
@@ -94,6 +100,7 @@ export default function PlaceOrder() {
       total_qty: args.totalQty,
       quality_min: args.qualityMin,
       deadline: args.deadline,
+      payment_terms: args.paymentTerms,
     });
     navigate(`/buyer/orders/${res.order_id}`);
   }

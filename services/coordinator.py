@@ -24,6 +24,7 @@ from core.exceptions import InvalidStateTransitionError, NeedsHumanReviewError, 
 from core.protocols import IAllocationEngine, ISettlementCalculator, ITrustScorer
 from core.settlement.calculator import SettlementCalculator, SettlementConfig
 from core.trust.scorer import TrustScorer, TrustScorerConfig
+from db.repositories.buyer_payment_repository import BuyerPaymentRepository
 from db.repositories.notification_repository import NotificationRepository
 from db.repositories.order_repository import OrderRepository
 from db.repositories.payment_repository import PaymentRepository
@@ -53,6 +54,7 @@ class OrderCoordinator:
         settlement_calculator: ISettlementCalculator,
         verification_agent: VerificationAgent,
         notification_gateway: NotificationGateway,
+        buyer_payment_repo: BuyerPaymentRepository,
     ) -> None:
         self._orders = order_repo
         self._workshops = workshop_repo
@@ -66,6 +68,27 @@ class OrderCoordinator:
         self._settlement = settlement_calculator
         self._agent = verification_agent
         self._gateway = notification_gateway
+        self._buyer_payments = buyer_payment_repo
+
+    async def create_advance_payment(self, order_id: int) -> None:
+        order_row = await self._orders.get(order_id)
+        if order_row is None or order_row["payment_terms"] == "PAY_ON_DELIVERY":
+            return
+
+        estimated_total = self._estimate_pre_allocation_total(order_row)
+        percentage = (
+            Decimal("1.00")
+            if order_row["payment_terms"] == "PAY_UPFRONT"
+            else settings.settlement_advance_percentage
+        )
+        amount = (estimated_total * percentage).quantize(Decimal("0.01"))
+        await self._buyer_payments.create_advance(order_id, amount)
+
+    @staticmethod
+    def _estimate_pre_allocation_total(order_row) -> Decimal:
+        base = Decimal(str(order_row["factory_fallback_cost"])) * order_row["total_qty"]
+        fee = (base * settings.platform_fee_percentage).quantize(Decimal("0.01"))
+        return (base + fee).quantize(Decimal("0.01"))
 
     async def on_order_placed(self, order_id: int) -> list[SublotAssignment]:
         logger.info("on_order_placed order_id=%d", order_id)
@@ -558,6 +581,16 @@ class OrderCoordinator:
         sublot_ids = [s.sublot_id for s in sublots]
         await self._payments.save_settlement(order_id, sublot_ids, result)
 
+        order_row = await self._orders.get(order_id)
+        if order_row is not None and order_row["payment_terms"] != "PAY_ON_DELIVERY":
+            existing = await self._buyer_payments.get_for_order(order_id)
+            advance_amount = next(
+                (Decimal(str(p["amount"])) for p in existing if p["kind"] == "ADVANCE"),
+                Decimal("0.00"),
+            )
+            balance = self._settlement.compute_balance_due(result.buyer_total, advance_amount)
+            await self._buyer_payments.create_balance(order_id, balance)
+
         await self._orders.transition_status(order_id, "SETTLING", "CLOSED")
         logger.info(
             "Order %d CLOSED. buyer_total=%s platform_fee=%s",
@@ -615,4 +648,5 @@ def build_coordinator(pool, checkpointer) -> OrderCoordinator:
             checkpointer=checkpointer,
         ),
         notification_gateway=ConsoleNotificationGateway(),
+        buyer_payment_repo=BuyerPaymentRepository(pool),
     )

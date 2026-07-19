@@ -44,6 +44,22 @@ CREATE TYPE trust_event_type AS ENUM (
     'SPEC_AMBIGUITY'
 );
 
+CREATE TYPE payment_terms AS ENUM (
+    'PAY_ON_DELIVERY',
+    'PAY_UPFRONT',
+    'ADVANCE_PLUS_BALANCE'
+);
+
+CREATE TYPE buyer_payment_kind AS ENUM (
+    'ADVANCE',
+    'BALANCE'
+);
+
+CREATE TYPE buyer_payment_status AS ENUM (
+    'PENDING',
+    'PAID'
+);
+
 CREATE TABLE workshops (
     workshop_id      SERIAL PRIMARY KEY,
     name             TEXT        NOT NULL,
@@ -103,6 +119,7 @@ CREATE TABLE orders (
     factory_fallback_cost  NUMERIC(12, 2) NOT NULL CHECK (factory_fallback_cost > 0),
     factory_workshop_id    INTEGER      NOT NULL REFERENCES workshops(workshop_id),
     status                 order_status NOT NULL DEFAULT 'PENDING',
+    payment_terms          payment_terms NOT NULL DEFAULT 'PAY_ON_DELIVERY',
     created_at             TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at             TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
@@ -156,6 +173,19 @@ CREATE TABLE payments (
 );
 
 CREATE INDEX idx_payments_order_id ON payments(order_id);
+
+CREATE TABLE buyer_payments (
+    buyer_payment_id SERIAL               PRIMARY KEY,
+    order_id         INTEGER              NOT NULL REFERENCES orders(order_id),
+    kind             buyer_payment_kind   NOT NULL,
+    amount           NUMERIC(12, 2)       NOT NULL,
+    status           buyer_payment_status NOT NULL DEFAULT 'PENDING',
+    created_at       TIMESTAMPTZ          NOT NULL DEFAULT now(),
+    paid_at          TIMESTAMPTZ,
+    UNIQUE (order_id, kind)
+);
+
+CREATE INDEX idx_buyer_payments_order_id ON buyer_payments(order_id);
 
 CREATE TABLE notifications (
     notification_id SERIAL        PRIMARY KEY,

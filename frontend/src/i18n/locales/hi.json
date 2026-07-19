@@ -245,7 +245,14 @@
     "tierPremium": "प्रीमियम",
     "tierPremiumBlurb": "बेहतर सटीकता, बारीक फिनिश",
     "tierExport": "एक्सपोर्ट ग्रेड",
-    "tierExportBlurb": "सबसे ऊंचा दर्जा — निर्यात के लिए तैयार"
+    "tierExportBlurb": "सबसे ऊंचा दर्जा — निर्यात के लिए तैयार",
+    "paymentTerms": "भुगतान की शर्तें",
+    "paymentPayOnDelivery": "डिलीवरी के बाद भुगतान करें",
+    "paymentPayOnDeliveryBlurb": "डिलीवरी के बाद पूरी राशि का भुगतान करें",
+    "paymentPayUpfront": "100% अग्रिम भुगतान करें",
+    "paymentPayUpfrontBlurb": "अभी अनुमानित पूरी राशि का भुगतान करें",
+    "paymentAdvancePlusBalance": "अभी {{pct}}% दें, बाकी डिलीवरी के बाद",
+    "paymentAdvancePlusBalanceBlurb": "बकाया राशि आपके ऑर्डर की डिलीवरी होने पर बिल की जाएगी"
   },
   "orderList": {
     "title": "आपके ऑर्डर",
@@ -306,7 +313,18 @@
     "defectReviewMessage": "इसे अपने आप जांचा नहीं जा सका — मैनुअल समीक्षा के लिए भेजा गया।",
     "defectOkMessage": "जांच हो गई — स्पेक के मुताबिक वर्कशॉप की कोई गलती नहीं मिली।",
     "aiReasoningLabel": "Saathi के AI ने क्या पाया",
-    "submitError": "शिकायत दर्ज नहीं हो सकी।"
+    "submitError": "शिकायत दर्ज नहीं हो सकी।",
+    "paymentsTitle": "भुगतान",
+    "paymentsLoadError": "भुगतान लोड नहीं हो सके।",
+    "paymentsPayError": "भुगतान प्रोसेस नहीं हो सका।",
+    "paymentKindAdvance": "अग्रिम राशि",
+    "paymentKindUpfront": "अग्रिम भुगतान",
+    "paymentKindBalance": "बकाया राशि",
+    "paymentKindRefund": "वापसी राशि",
+    "paymentStatusPending": "लंबित",
+    "paymentStatusPaid": "भुगतान हो गया",
+    "payNow": "अभी भुगतान करें",
+    "paying": "भुगतान हो रहा है…"
   },
   "invoice": {
     "backToOrder": "← ऑर्डर #{{id}}",

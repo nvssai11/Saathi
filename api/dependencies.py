@@ -4,6 +4,7 @@ from fastapi import Depends, Header, HTTPException, status
 
 from config import settings
 from db.connection import get_pool
+from db.repositories.buyer_payment_repository import BuyerPaymentRepository
 from db.repositories.notification_repository import NotificationRepository
 from db.repositories.order_repository import OrderRepository
 from db.repositories.otp_repository import OtpRepository
@@ -67,6 +68,10 @@ def verification_repo() -> VerificationRepository:
 
 def payment_repo() -> PaymentRepository:
     return PaymentRepository(get_pool())
+
+
+def buyer_payment_repo() -> BuyerPaymentRepository:
+    return BuyerPaymentRepository(get_pool())
 
 
 def notification_repo() -> NotificationRepository:

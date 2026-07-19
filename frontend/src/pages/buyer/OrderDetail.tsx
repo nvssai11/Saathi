@@ -2,7 +2,13 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../../context/AuthContext";
-import { ApiError, OrderQuoteResponse, OrderStatusResponse, buyerApi } from "../../api/client";
+import {
+  ApiError,
+  BuyerPaymentsResponse,
+  OrderQuoteResponse,
+  OrderStatusResponse,
+  buyerApi,
+} from "../../api/client";
 import Layout from "../../components/Layout";
 import OrderStepper from "../../components/OrderStepper";
 import { SkeletonCard } from "../../components/Skeleton";
@@ -45,6 +51,10 @@ export default function OrderDetail() {
 
   const [defectPhotoUrl, setDefectPhotoUrl] = useState<string | null>(null);
 
+  const [payments, setPayments] = useState<BuyerPaymentsResponse | null>(null);
+  const [payingId, setPayingId] = useState<number | null>(null);
+  const [paymentsError, setPaymentsError] = useState<string | null>(null);
+
   const load = useCallback(async () => {
     if (!token || !id) return;
     try {
@@ -56,12 +66,38 @@ export default function OrderDetail() {
     }
   }, [token, id, t]);
 
+  const loadPayments = useCallback(async () => {
+    if (!token || !id) return;
+    try {
+      const res = await buyerApi.getPayments(token, id);
+      setPayments(res);
+      setPaymentsError(null);
+    } catch (err) {
+      setPaymentsError(err instanceof ApiError ? err.message : t("orderDetail.paymentsLoadError"));
+    }
+  }, [token, id, t]);
+
+  async function handlePay(paymentId: number) {
+    if (!token || !id) return;
+    setPayingId(paymentId);
+    try {
+      await buyerApi.payBuyerPayment(token, id, paymentId);
+      await loadPayments();
+    } catch (err) {
+      setPaymentsError(err instanceof ApiError ? err.message : t("orderDetail.paymentsPayError"));
+    } finally {
+      setPayingId(null);
+    }
+  }
+
   useEffect(() => {
     setOrder(null);
     setQuote(null);
     setQuoteError(null);
     setFlagMessage(null);
     setDefectPhotoUrl(null);
+    setPayments(null);
+    setPaymentsError(null);
   }, [id]);
 
   useEffect(() => {
@@ -87,15 +123,22 @@ export default function OrderDetail() {
 
   useEffect(() => {
     load();
+    loadPayments();
     const interval = setInterval(() => {
       setOrder((current) => {
         if (current && TERMINAL.has(current.status)) return current;
         load();
         return current;
       });
+      setPayments((current) => {
+        const allPaid = current !== null && current.items.every((i) => i.status === "PAID");
+        if (allPaid) return current;
+        loadPayments();
+        return current;
+      });
     }, 4000);
     return () => clearInterval(interval);
-  }, [load]);
+  }, [load, loadPayments]);
 
   async function handleCancel() {
     if (!token || !order) return;
@@ -286,6 +329,59 @@ export default function OrderDetail() {
                 {t("orderDetail.noKeepOrder")}
               </button>
             </div>
+          </div>
+        )}
+
+        {paymentsError && (
+          <div className="banner banner-error">
+            <span>{paymentsError}</span>
+            <button className="btn-retry" onClick={loadPayments}>
+              {t("common.retry")}
+            </button>
+          </div>
+        )}
+
+        {payments && payments.items.length > 0 && (
+          <div className="card">
+            <h2>{t("orderDetail.paymentsTitle")}</h2>
+            {payments.items.map((item) => {
+              const isCredit = item.kind === "BALANCE" && Number(item.amount) < 0;
+              const kindLabel =
+                item.kind === "ADVANCE"
+                  ? payments.payment_terms === "PAY_UPFRONT"
+                    ? t("orderDetail.paymentKindUpfront")
+                    : t("orderDetail.paymentKindAdvance")
+                  : isCredit
+                  ? t("orderDetail.paymentKindRefund")
+                  : t("orderDetail.paymentKindBalance");
+              const displayAmount = isCredit
+                ? (-Number(item.amount)).toFixed(2)
+                : item.amount;
+              return (
+                <div className="invoice-row" key={item.buyer_payment_id}>
+                  <span>{kindLabel}</span>
+                  <span className="payment-amount-cell">
+                    ₹{displayAmount}
+                    <span className={`status-pill ${item.status === "PAID" ? "status-good" : "status-warning"}`}>
+                      {item.status === "PAID"
+                        ? t("orderDetail.paymentStatusPaid")
+                        : t("orderDetail.paymentStatusPending")}
+                    </span>
+                    {item.status === "PENDING" && !isCredit && (
+                      <button
+                        className="btn btn-primary btn-sm"
+                        onClick={() => handlePay(item.buyer_payment_id)}
+                        disabled={payingId === item.buyer_payment_id}
+                      >
+                        {payingId === item.buyer_payment_id
+                          ? t("orderDetail.paying")
+                          : t("orderDetail.payNow")}
+                      </button>
+                    )}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         )}
 

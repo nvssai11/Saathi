@@ -34,17 +34,18 @@ class OrderRepository:
         deadline: date,
         factory_fallback_cost: Decimal,
         factory_workshop_id: int,
+        payment_terms: str = "PAY_ON_DELIVERY",
     ) -> int:
         row = await self._pool.fetchrow(
             """
             INSERT INTO orders
                 (buyer_ref, product_type, total_qty, quality_min, deadline,
-                 factory_fallback_cost, factory_workshop_id)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+                 factory_fallback_cost, factory_workshop_id, payment_terms)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING order_id
             """,
             buyer_ref, product_type, total_qty, quality_min, deadline,
-            factory_fallback_cost, factory_workshop_id,
+            factory_fallback_cost, factory_workshop_id, payment_terms,
         )
         return row["order_id"]
 

@@ -100,12 +100,15 @@ function uploadWithProgress<T>(
   });
 }
 
+export type PaymentTerms = "PAY_ON_DELIVERY" | "PAY_UPFRONT" | "ADVANCE_PLUS_BALANCE";
+
 export interface PlaceOrderRequest {
   buyer_ref: string;
   product_type: string;
   total_qty: number;
   quality_min: number;
   deadline: string;
+  payment_terms: PaymentTerms;
 }
 
 export interface PlaceOrderResponse {
@@ -161,6 +164,21 @@ export interface SettlementSummaryResponse {
   buyer_base: string;
   platform_fee: string;
   buyer_total: string;
+}
+
+export interface BuyerPaymentItem {
+  buyer_payment_id: number;
+  kind: "ADVANCE" | "BALANCE";
+  amount: string;
+  status: "PENDING" | "PAID";
+  created_at: string;
+  paid_at: string | null;
+}
+
+export interface BuyerPaymentsResponse {
+  order_id: number;
+  payment_terms: PaymentTerms;
+  items: BuyerPaymentItem[];
 }
 
 export interface WorkshopCapacityUpdateRequest {
@@ -273,6 +291,15 @@ export const buyerApi = {
 
   getInvoice: (token: string, orderId: number) =>
     request<SettlementSummaryResponse>(`/orders/${orderId}/invoice`, { token }),
+
+  getPayments: (token: string, orderId: number) =>
+    request<BuyerPaymentsResponse>(`/orders/${orderId}/payments`, { token }),
+
+  payBuyerPayment: (token: string, orderId: number, paymentId: number) =>
+    request<BuyerPaymentItem>(`/orders/${orderId}/payments/${paymentId}/pay`, {
+      method: "POST",
+      token,
+    }),
 
   getDefectPhotoUrl: async (token: string, orderId: number): Promise<string> => {
     const res = await fetch(`${API_BASE_URL}/orders/${orderId}/defect-photo`, {

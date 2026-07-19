@@ -1,3 +1,4 @@
+from decimal import Decimal
 from typing import Protocol, runtime_checkable
 
 from core.domain import (
@@ -42,4 +43,9 @@ class ISettlementCalculator(Protocol):
         sublots: list[SubLotRecord],
         verifications: dict[int, VerificationRecord],
     ) -> SettlementResult:
+        ...
+
+    def compute_balance_due(
+        self, buyer_total: Decimal, advance_collected: Decimal
+    ) -> Decimal:
         ...

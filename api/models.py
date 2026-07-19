@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -12,6 +13,9 @@ class PlaceOrderRequest(BaseModel):
     total_qty: int = Field(..., gt=0)
     quality_min: int = Field(..., ge=1, le=5)
     deadline: date
+    payment_terms: Literal[
+        "PAY_ON_DELIVERY", "PAY_UPFRONT", "ADVANCE_PLUS_BALANCE"
+    ] = "PAY_ON_DELIVERY"
 
     @field_validator("deadline")
     @classmethod
@@ -120,6 +124,21 @@ class SettlementSummaryResponse(BaseModel):
     buyer_base: Decimal
     platform_fee: Decimal
     buyer_total: Decimal
+
+
+class BuyerPaymentItem(BaseModel):
+    buyer_payment_id: int
+    kind: str
+    amount: Decimal
+    status: str
+    created_at: datetime
+    paid_at: datetime | None = None
+
+
+class BuyerPaymentsResponse(BaseModel):
+    order_id: int
+    payment_terms: str
+    items: list[BuyerPaymentItem]
 
 
 class MarkDeliveredRequest(BaseModel):

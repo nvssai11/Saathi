@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     workshop_sublot_list_limit: int = 200
     platform_fee_percentage: Decimal = Decimal("0.05")
     penalty_non_delivery_percentage: Decimal = Decimal("0.20")
+    settlement_advance_percentage: Decimal = Decimal("0.30")
     buyer_token: str = "buyer-demo-token"
     admin_token: str = "admin-demo-token"
     workshop_tokens_json: str = Field(

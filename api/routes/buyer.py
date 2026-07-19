@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Respon
 from fastapi.responses import FileResponse
 
 from api.dependencies import (
+    buyer_payment_repo,
     get_coordinator,
     order_repo,
     payment_repo,
@@ -19,6 +20,8 @@ from api.dependencies import (
 )
 from api.uploads import save_defect_photo
 from api.models import (
+    BuyerPaymentItem,
+    BuyerPaymentsResponse,
     OrderListItem,
     OrderListResponse,
     OrderQuoteResponse,
@@ -32,6 +35,7 @@ from api.models import (
 from config import settings
 from core.exceptions import InvalidStateTransitionError
 from core.media_types import SUPPORTED_IMAGE_EXTENSIONS
+from db.repositories.buyer_payment_repository import BuyerPaymentRepository
 from db.repositories.order_repository import OrderRepository
 from db.repositories.payment_repository import PaymentRepository
 from db.repositories.sublot_repository import SublotRepository
@@ -52,6 +56,7 @@ async def place_order(
     _: None = Depends(require_buyer),
     orders: OrderRepository = Depends(order_repo),
     workshops: WorkshopRepository = Depends(workshop_repo),
+    coordinator: OrderCoordinator = Depends(get_coordinator),
 ):
     factory = await workshops.get_factory(body.product_type)
     if factory is None:
@@ -68,7 +73,9 @@ async def place_order(
         deadline=body.deadline,
         factory_fallback_cost=Decimal(str(factory["cost_per_unit"])),
         factory_workshop_id=factory["workshop_id"],
+        payment_terms=body.payment_terms,
     )
+    await coordinator.create_advance_payment(order_id)
 
     order_row = await orders.get(order_id)
     correlation_id = str(order_row["correlation_id"])
@@ -241,6 +248,75 @@ async def get_order_invoice(
         buyer_base=buyer_base,
         platform_fee=platform_fee,
         buyer_total=buyer_total,
+    )
+
+
+@router.get("/{order_id}/payments", response_model=BuyerPaymentsResponse)
+async def get_order_payments(
+    order_id: int,
+    response: Response,
+    _: None = Depends(require_buyer),
+    orders: OrderRepository = Depends(order_repo),
+    buyer_payments: BuyerPaymentRepository = Depends(buyer_payment_repo),
+):
+    order_row = await orders.get(order_id)
+    if order_row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "ORDER_NOT_FOUND", "message": f"Order {order_id} does not exist"},
+        )
+    response.headers["X-Correlation-ID"] = str(order_row["correlation_id"])
+
+    rows = await buyer_payments.get_for_order(order_id)
+    return BuyerPaymentsResponse(
+        order_id=order_id,
+        payment_terms=order_row["payment_terms"],
+        items=[_to_buyer_payment_item(row) for row in rows],
+    )
+
+
+@router.post("/{order_id}/payments/{payment_id}/pay", response_model=BuyerPaymentItem)
+async def pay_order_payment(
+    order_id: int,
+    payment_id: int,
+    response: Response,
+    _: None = Depends(require_buyer),
+    orders: OrderRepository = Depends(order_repo),
+    buyer_payments: BuyerPaymentRepository = Depends(buyer_payment_repo),
+):
+    order_row = await orders.get(order_id)
+    if order_row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "ORDER_NOT_FOUND", "message": f"Order {order_id} does not exist"},
+        )
+    response.headers["X-Correlation-ID"] = str(order_row["correlation_id"])
+
+    updated = await buyer_payments.mark_paid(order_id, payment_id)
+    if updated is None:
+        existing = await buyer_payments.get_for_order(order_id)
+        match = next((r for r in existing if r["buyer_payment_id"] == payment_id), None)
+        if match is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "PAYMENT_NOT_FOUND", "message": f"Payment {payment_id} not found for order {order_id}"},
+            )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "ALREADY_PAID", "message": f"Payment {payment_id} is already paid"},
+        )
+
+    return _to_buyer_payment_item(updated)
+
+
+def _to_buyer_payment_item(row) -> BuyerPaymentItem:
+    return BuyerPaymentItem(
+        buyer_payment_id=row["buyer_payment_id"],
+        kind=row["kind"],
+        amount=row["amount"],
+        status=row["status"],
+        created_at=row["created_at"],
+        paid_at=row["paid_at"],
     )
 
 

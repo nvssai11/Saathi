@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { PaymentTerms } from "../api/client";
 import {
   CatalogItem,
   QUALITY_TIERS,
@@ -11,7 +12,13 @@ import {
 interface BulkOrderSheetProps {
   item: CatalogItem;
   onClose: () => void;
-  onSubmit: (args: { totalQty: number; qualityMin: number; deadline: string; buyerRef: string }) => Promise<void>;
+  onSubmit: (args: {
+    totalQty: number;
+    qualityMin: number;
+    deadline: string;
+    buyerRef: string;
+    paymentTerms: PaymentTerms;
+  }) => Promise<void>;
 }
 
 const TIER_KEY: Record<number, { label: string; blurb: string }> = {
@@ -19,6 +26,15 @@ const TIER_KEY: Record<number, { label: string; blurb: string }> = {
   4: { label: "tierPremium", blurb: "tierPremiumBlurb" },
   5: { label: "tierExport", blurb: "tierExportBlurb" },
 };
+
+// Mirrors config.py's settings.settlement_advance_percentage default (0.30).
+const ADVANCE_PERCENTAGE = 30;
+
+const PAYMENT_TERMS_OPTIONS: { value: PaymentTerms; label: string; blurb: string }[] = [
+  { value: "PAY_ON_DELIVERY", label: "paymentPayOnDelivery", blurb: "paymentPayOnDeliveryBlurb" },
+  { value: "PAY_UPFRONT", label: "paymentPayUpfront", blurb: "paymentPayUpfrontBlurb" },
+  { value: "ADVANCE_PLUS_BALANCE", label: "paymentAdvancePlusBalance", blurb: "paymentAdvancePlusBalanceBlurb" },
+];
 
 function defaultDeadline(): string {
   const d = new Date();
@@ -43,6 +59,7 @@ export default function BulkOrderSheet({ item, onClose, onSubmit }: BulkOrderShe
   const tierFactoryPrice = factoryPriceForTier(item, tier);
   const [deadline, setDeadline] = useState(defaultDeadline());
   const [buyerRef, setBuyerRef] = useState("");
+  const [paymentTerms, setPaymentTerms] = useState<PaymentTerms>("PAY_ON_DELIVERY");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -83,6 +100,7 @@ export default function BulkOrderSheet({ item, onClose, onSubmit }: BulkOrderShe
         qualityMin: tier,
         deadline,
         buyerRef: buyerRef.trim() || `SAATHI-${Date.now().toString().slice(-8)}`,
+        paymentTerms,
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : t("bulkOrder.couldNotPlace"));
@@ -161,6 +179,26 @@ export default function BulkOrderSheet({ item, onClose, onSubmit }: BulkOrderShe
                   <span className="tier-label">{t(`bulkOrder.${TIER_KEY[qt.value]?.label}`, qt.label)}</span>
                   <span className="tier-blurb">{t(`bulkOrder.${TIER_KEY[qt.value]?.blurb}`, qt.blurb)}</span>
                   <span className="tier-price">₹{priceForTier(item, qt.value)}/unit</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="field">
+            <label>{t("bulkOrder.paymentTerms")}</label>
+            <div className="tier-options">
+              {PAYMENT_TERMS_OPTIONS.map((opt) => (
+                <button
+                  type="button"
+                  key={opt.value}
+                  className={`tier-option ${paymentTerms === opt.value ? "active" : ""}`}
+                  aria-pressed={paymentTerms === opt.value}
+                  onClick={() => setPaymentTerms(opt.value)}
+                >
+                  <span className="tier-label">{t(`bulkOrder.${opt.label}`)}</span>
+                  <span className="tier-blurb">
+                    {t(`bulkOrder.${opt.blurb}`, { pct: ADVANCE_PERCENTAGE })}
+                  </span>
                 </button>
               ))}
             </div>

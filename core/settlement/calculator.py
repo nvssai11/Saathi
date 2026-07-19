@@ -49,6 +49,10 @@ class SettlementCalculator:
         )
 
     @staticmethod
+    def compute_balance_due(buyer_total: Decimal, advance_collected: Decimal) -> Decimal:
+        return (buyer_total - advance_collected).quantize(Decimal("0.01"))
+
+    @staticmethod
     def _buyer_billable_amount(
         sublot: SubLotRecord, verification: VerificationRecord | None
     ) -> Decimal:

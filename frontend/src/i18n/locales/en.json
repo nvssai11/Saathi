@@ -245,7 +245,14 @@
     "tierPremium": "Premium",
     "tierPremiumBlurb": "Tighter tolerances, finer finish",
     "tierExport": "Export Grade",
-    "tierExportBlurb": "Highest tier — export-ready"
+    "tierExportBlurb": "Highest tier — export-ready",
+    "paymentTerms": "Payment terms",
+    "paymentPayOnDelivery": "Pay on delivery",
+    "paymentPayOnDeliveryBlurb": "Settle the full amount after delivery",
+    "paymentPayUpfront": "Pay 100% upfront",
+    "paymentPayUpfrontBlurb": "Pay the full estimate now",
+    "paymentAdvancePlusBalance": "Pay {{pct}}% now, rest after delivery",
+    "paymentAdvancePlusBalanceBlurb": "Balance is billed once your order is delivered"
   },
   "orderList": {
     "title": "Your orders",
@@ -306,7 +313,18 @@
     "defectReviewMessage": "Couldn't automatically verify this one — flagged for manual review.",
     "defectOkMessage": "Checked — no workshop-fault defect found against the spec.",
     "aiReasoningLabel": "What Saathi's AI found",
-    "submitError": "Could not submit defect report."
+    "submitError": "Could not submit defect report.",
+    "paymentsTitle": "Payments",
+    "paymentsLoadError": "Could not load payments.",
+    "paymentsPayError": "Could not process payment.",
+    "paymentKindAdvance": "Advance",
+    "paymentKindUpfront": "Upfront payment",
+    "paymentKindBalance": "Balance due",
+    "paymentKindRefund": "Refund due",
+    "paymentStatusPending": "Pending",
+    "paymentStatusPaid": "Paid",
+    "payNow": "Pay now",
+    "paying": "Paying…"
   },
   "invoice": {
     "backToOrder": "← Order #{{id}}",
