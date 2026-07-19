@@ -39,6 +39,28 @@ logging.getLogger().handlers[0].addFilter(CorrelationIdFilter())
 logger = logging.getLogger(__name__)
 
 
+async def _supervise(name: str, worker) -> None:
+    """Keep a background worker's run() loop alive across crashes.
+
+    Each worker's own run() already retries recoverable per-message/per-sweep
+    failures internally — this is the outer safety net for the case that
+    matters more: run() itself exiting (an unhandled exception escaping it,
+    or it returning at all), which previously left that worker silently dead
+    for the rest of the process's life with nothing else noticing. Kafka
+    consumer teardown/rebuild on restart is safe — a fresh AIOKafkaConsumer
+    rejoins the same group and resumes from the last committed offset.
+    """
+    while True:
+        try:
+            await worker.run()
+            logger.critical("%s.run() returned without cancellation — restarting", name)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.critical("%s crashed — restarting in 5s", name, exc_info=True)
+        await asyncio.sleep(5)
+
+
 async def lifespan(app: FastAPI):
     pool = await create_pool()
     checkpointer = await create_checkpointer()
@@ -53,11 +75,11 @@ async def lifespan(app: FastAPI):
     auto_verify_worker = AutoVerifyWorker(coordinator)
     stuck_order_worker = StuckOrderWorker(coordinator)
     worker_tasks = [
-        asyncio.create_task(allocation_worker.run(), name="allocation-worker"),
-        asyncio.create_task(verification_worker.run(), name="verification-worker"),
-        asyncio.create_task(notification_worker.run(), name="notification-worker"),
-        asyncio.create_task(auto_verify_worker.run(), name="auto-verify-worker"),
-        asyncio.create_task(stuck_order_worker.run(), name="stuck-order-worker"),
+        asyncio.create_task(_supervise("AllocationWorker", allocation_worker), name="allocation-worker"),
+        asyncio.create_task(_supervise("VerificationWorker", verification_worker), name="verification-worker"),
+        asyncio.create_task(_supervise("NotificationWorker", notification_worker), name="notification-worker"),
+        asyncio.create_task(_supervise("AutoVerifyWorker", auto_verify_worker), name="auto-verify-worker"),
+        asyncio.create_task(_supervise("StuckOrderWorker", stuck_order_worker), name="stuck-order-worker"),
     ]
     logger.info("Saathi API started")
 
