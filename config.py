@@ -9,6 +9,15 @@ class Settings(BaseSettings):
     database_url: str = "postgresql://saathi:saathi@localhost:5432/saathi"
     db_pool_min_size: int = 5
     db_pool_max_size: int = 20
+    # Serverless Postgres (e.g. Neon) can suspend its compute after an idle
+    # period and needs a moment to wake on the next connection — the very
+    # first connection attempt at container startup can hit that cold-start
+    # window and get refused. Retry with backoff instead of failing app
+    # startup outright. Harmless against always-on Postgres (succeeds on the
+    # first attempt there, same as before).
+    db_pool_connect_retry_attempts: int = 5
+    db_pool_connect_retry_min_wait_seconds: int = 2
+    db_pool_connect_retry_max_wait_seconds: int = 15
     checkpointer_pool_min_size: int = 2
     checkpointer_pool_max_size: int = 5
     kafka_bootstrap_servers: str = "localhost:9092"

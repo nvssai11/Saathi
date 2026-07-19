@@ -1,6 +1,7 @@
 import json
 
 import asyncpg
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from config import settings
 
@@ -17,6 +18,15 @@ async def _init_connection(conn: asyncpg.Connection) -> None:
     )
 
 
+@retry(
+    retry=retry_if_exception_type((OSError, asyncpg.exceptions.CannotConnectNowError)),
+    stop=stop_after_attempt(settings.db_pool_connect_retry_attempts),
+    wait=wait_exponential(
+        min=settings.db_pool_connect_retry_min_wait_seconds,
+        max=settings.db_pool_connect_retry_max_wait_seconds,
+    ),
+    reraise=True,
+)
 async def create_pool() -> asyncpg.Pool:
     global _pool
     _pool = await asyncpg.create_pool(
