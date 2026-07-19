@@ -201,9 +201,11 @@ export default function MySublots() {
                   >
                     {t("sublots.deliverAll", { qty: s.qty_assigned })}
                   </button>
-                  <button className="btn btn-ghost btn-sm" onClick={() => openDeliver(s)}>
-                    {t("sublots.fewer")}
-                  </button>
+                  {!s.is_factory && (
+                    <button className="btn btn-ghost btn-sm" onClick={() => openDeliver(s)}>
+                      {t("sublots.fewer")}
+                    </button>
+                  )}
                 </>
               )}
               {s.status === "DELIVERED" && (

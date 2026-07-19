@@ -160,6 +160,7 @@ class SubLotSummary(BaseModel):
     qty_assigned: int
     delivered_qty: int | None
     status: str
+    is_factory: bool = False
     explanation: str | None = None
     explanations: dict[str, str] = Field(default_factory=dict)
 

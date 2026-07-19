@@ -95,8 +95,10 @@ async def list_my_capacity(
 async def list_my_sublots(
     workshop_id: int = Depends(require_workshop),
     sublots: SublotRepository = Depends(sublot_repo),
+    workshops: WorkshopRepository = Depends(workshop_repo),
 ):
     records = await sublots.list_for_workshop(workshop_id, limit=settings.workshop_sublot_list_limit)
+    is_factory = await workshops.is_factory(workshop_id)
     return [
         SubLotSummary(
             sublot_id=r["sublot_id"],
@@ -106,6 +108,7 @@ async def list_my_sublots(
             qty_assigned=r["qty_assigned"],
             delivered_qty=r["delivered_qty"],
             status=r["status"],
+            is_factory=is_factory,
             explanation=r["explanation"],
             explanations=r["explanations"] or {},
         )
@@ -119,6 +122,7 @@ async def mark_sublot_delivered(
     body: MarkDeliveredRequest,
     workshop_id: int = Depends(require_workshop),
     sublots: SublotRepository = Depends(sublot_repo),
+    workshops: WorkshopRepository = Depends(workshop_repo),
 ):
     sublot = await sublots.get(sublot_id)
     if sublot is None:
@@ -136,6 +140,14 @@ async def mark_sublot_delivered(
             detail=(
                 f"delivered_qty ({body.delivered_qty}) cannot exceed "
                 f"qty_assigned ({sublot.qty_assigned})"
+            ),
+        )
+    if body.delivered_qty < sublot.qty_assigned and await workshops.is_factory(workshop_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"The factory fallback must deliver the full assigned quantity "
+                f"({sublot.qty_assigned}) — partial delivery isn't allowed here"
             ),
         )
 

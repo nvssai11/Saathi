@@ -117,6 +117,14 @@ class WorkshopRepository:
             workshop_id, product_type, available_qty, cost_per_unit, lead_time_days,
         )
 
+    async def is_factory(self, workshop_id: int) -> bool:
+        return bool(
+            await self._pool.fetchval(
+                "SELECT is_factory FROM workshops WHERE workshop_id = $1",
+                workshop_id,
+            )
+        )
+
     async def get_by_phone(self, phone_number: str) -> asyncpg.Record | None:
         return await self._pool.fetchrow(
             "SELECT workshop_id, name FROM workshops WHERE phone_number = $1",

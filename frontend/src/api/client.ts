@@ -206,6 +206,7 @@ export interface SubLotSummary {
   qty_assigned: number;
   delivered_qty: number | null;
   status: string;
+  is_factory: boolean;
   explanation: string | null;
   explanations: Record<string, string>;
 }
