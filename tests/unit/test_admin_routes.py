@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from decimal import Decimal
 
-from api.dependencies import get_coordinator, order_repo, require_admin, sublot_repo
+from api.dependencies import get_coordinator, notification_repo, order_repo, require_admin, sublot_repo
 from api.errors import http_exception_handler
 from api.routes.admin import router as admin_router
 from core.exceptions import InvalidStateTransitionError
@@ -24,7 +24,7 @@ client = TestClient(app)
 @pytest.fixture(autouse=True)
 def _reset_overrides():
     yield
-    for dep in (order_repo, get_coordinator, sublot_repo):
+    for dep in (order_repo, get_coordinator, sublot_repo, notification_repo):
         app.dependency_overrides.pop(dep, None)
     app.dependency_overrides[require_admin] = lambda: None
 
@@ -57,6 +57,41 @@ def test_enforce_deadline_409_when_deadline_not_passed():
     assert response.json()["error"]["code"] == "DEADLINE_NOT_PASSED"
 
 
+def test_republish_notifications_404_when_order_missing():
+    app.dependency_overrides[order_repo] = lambda: _mock_orders(None)
+    app.dependency_overrides[sublot_repo] = lambda: AsyncMock()
+    app.dependency_overrides[notification_repo] = lambda: AsyncMock()
+
+    response = client.post("/admin/orders/999/republish-notifications")
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "ORDER_NOT_FOUND"
+
+
+def test_republish_notifications_recreates_one_per_sublot():
+    app.dependency_overrides[order_repo] = lambda: _mock_orders({"product_type": "khadi-scarf"})
+    sublots = AsyncMock()
+    sublots.list_for_order_admin.return_value = [
+        {"sublot_id": 1, "workshop_id": 7, "qty_assigned": 60},
+        {"sublot_id": 2, "workshop_id": 8, "qty_assigned": 40},
+    ]
+    app.dependency_overrides[sublot_repo] = lambda: sublots
+    notifications = AsyncMock()
+    app.dependency_overrides[notification_repo] = lambda: notifications
+
+    response = client.post("/admin/orders/42/republish-notifications")
+
+    assert response.status_code == 200
+    assert response.json() == {"order_id": 42, "notifications_republished": 2}
+    assert notifications.create.await_count == 2
+    notifications.create.assert_any_await(
+        workshop_id=7, order_id=42, sublot_id=1, product_type="khadi-scarf", qty_assigned=60
+    )
+    notifications.create.assert_any_await(
+        workshop_id=8, order_id=42, sublot_id=2, product_type="khadi-scarf", qty_assigned=40
+    )
+
+
 def test_enforce_deadline_200_returns_failed_count():
     app.dependency_overrides[order_repo] = lambda: _mock_orders({"status": "IN_PRODUCTION"})
     coordinator = AsyncMock()
@@ -70,34 +105,27 @@ def test_enforce_deadline_200_returns_failed_count():
 
 
 def test_reconcile_stuck_republishes_each_order():
-    orders = AsyncMock()
-    orders.list_stuck_pending.return_value = [
-        {"order_id": 1, "correlation_id": "aaa"},
-        {"order_id": 2, "correlation_id": "bbb"},
-    ]
-    app.dependency_overrides[order_repo] = lambda: orders
+    coordinator = AsyncMock()
+    coordinator.reconcile_stuck_orders.return_value = [1, 2]
+    app.dependency_overrides[get_coordinator] = lambda: coordinator
 
-    with patch("api.routes.admin.publish_order_placed", new=AsyncMock()) as mock_publish:
-        response = client.post("/admin/orders/reconcile-stuck")
+    response = client.post("/admin/orders/reconcile-stuck")
 
     assert response.status_code == 200
     assert response.json() == {"republished_count": 2, "order_ids": [1, 2]}
-    assert mock_publish.await_count == 2
-    mock_publish.assert_any_await(1, "aaa")
-    mock_publish.assert_any_await(2, "bbb")
+    coordinator.reconcile_stuck_orders.assert_awaited_once()
 
 
 def test_reconcile_stuck_no_orders_is_a_noop():
-    orders = AsyncMock()
-    orders.list_stuck_pending.return_value = []
-    app.dependency_overrides[order_repo] = lambda: orders
+    coordinator = AsyncMock()
+    coordinator.reconcile_stuck_orders.return_value = []
+    app.dependency_overrides[get_coordinator] = lambda: coordinator
 
-    with patch("api.routes.admin.publish_order_placed", new=AsyncMock()) as mock_publish:
-        response = client.post("/admin/orders/reconcile-stuck")
+    response = client.post("/admin/orders/reconcile-stuck")
 
     assert response.status_code == 200
     assert response.json() == {"republished_count": 0, "order_ids": []}
-    mock_publish.assert_not_awaited()
+    coordinator.reconcile_stuck_orders.assert_awaited_once()
 
 
 def test_get_order_allocation_404_when_order_missing():
