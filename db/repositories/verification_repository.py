@@ -14,25 +14,32 @@ class VerificationRepository:
         sublot_id: int,
         output: VerificationOutput,
         photo_path: str | None,
+        explanations: dict[str, str] | None = None,
     ) -> None:
         await self._pool.execute(
             """
             INSERT INTO verification_results
-                (sublot_id, verdict, fault_party, confidence, explanation, photo_path)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            ON CONFLICT (sublot_id) DO NOTHING
+                (sublot_id, verdict, fault_party, confidence, explanation, explanations, photo_path)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             """,
             sublot_id,
             output.verdict,
             output.fault_party,
             output.confidence,
             output.explanation,
+            explanations or {},
             photo_path,
         )
 
     async def get(self, sublot_id: int) -> VerificationRecord | None:
         row = await self._pool.fetchrow(
-            "SELECT * FROM verification_results WHERE sublot_id = $1", sublot_id
+            """
+            SELECT * FROM verification_results
+             WHERE sublot_id = $1
+             ORDER BY created_at DESC
+             LIMIT 1
+            """,
+            sublot_id,
         )
         if row is None:
             return None
@@ -57,13 +64,28 @@ class VerificationRepository:
         )
         return [r["explanation"] for r in rows]
 
+    async def get_latest_photo_path_for_order(self, order_id: int) -> str | None:
+        row = await self._pool.fetchrow(
+            """
+            SELECT vr.photo_path
+              FROM verification_results vr
+              JOIN sublots s USING (sublot_id)
+             WHERE s.order_id = $1 AND vr.photo_path IS NOT NULL
+             ORDER BY vr.created_at DESC
+             LIMIT 1
+            """,
+            order_id,
+        )
+        return row["photo_path"] if row else None
+
     async def get_for_order(self, order_id: int) -> dict[int, VerificationRecord]:
         rows = await self._pool.fetch(
             """
-            SELECT vr.*
+            SELECT DISTINCT ON (vr.sublot_id) vr.*
               FROM verification_results vr
               JOIN sublots s USING (sublot_id)
              WHERE s.order_id = $1
+             ORDER BY vr.sublot_id, vr.created_at DESC
             """,
             order_id,
         )

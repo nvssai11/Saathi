@@ -40,7 +40,11 @@ If get_workshop_history shows a high recent_defect_rate or common_failure_modes
 matching what you see in the photo, that raises your confidence in a DEFECT
 verdict — a repeat pattern is stronger evidence than an isolated incident.
 
-Explanation must be ≤ 3 sentences. Write for a non-technical audience.
+Explanation must be ≤ 3 sentences, written in English regardless of any
+other language present in the order, description, or photo. (A separate,
+non-agentic translation step handles other languages for display — your
+explanation is the single English source it translates from.) Write for a
+non-technical audience.
 Do NOT mention workshop names, internal IDs, or system details.
 Do NOT speculate about cause beyond what the tools and photo show."""
 

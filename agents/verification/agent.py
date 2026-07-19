@@ -2,12 +2,18 @@ from __future__ import annotations
 
 import base64
 import logging
+import operator
 from pathlib import Path
+from typing import Annotated, TypedDict
 
 import httpx
 from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types
+from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.errors import GraphRecursionError
+from langgraph.graph import END, START, StateGraph
+from langgraph.types import Command, Send, interrupt
 from tenacity import (
     retry,
     retry_if_exception_type,
@@ -33,6 +39,45 @@ _VALID_VERDICTS = frozenset({"OK", "DEFECT", "SPEC_AMBIGUITY"})
 _VALID_FAULT_PARTIES = frozenset({"workshop", "buyer", "none"})
 _REQUIRED_TOOLS_BEFORE_VERDICT = frozenset({"get_order_spec", "get_workshop_history"})
 
+_LANGUAGE_NAMES: dict[str, str] = {"hi": "Hindi"}
+
+_NUDGE_TEXT = (
+    "Please continue — call get_order_spec, get_workshop_history, "
+    "and then submit_verdict."
+)
+_STRICTER_RETRY_TEXT = (
+    "You have the order spec and workshop history already. "
+    "Return your verdict now by calling submit_verdict."
+)
+
+
+def _accumulate_or_reset(existing: list | None, new: list | None) -> list:
+    if new is None:
+        return []
+    return (existing or []) + new
+
+
+class _VerifyState(TypedDict, total=False):
+    contents: Annotated[list[dict], operator.add]
+    called_tools: set[str]
+    iteration: int
+    order_id: int
+    workshop_id: int
+    sublot_id: int
+    finish_reason_is_stop: bool
+    function_calls: list[dict]
+    model_turn: dict
+    tool_results: Annotated[list[dict], _accumulate_or_reset]
+    result: VerificationOutput
+
+
+class _ToolCallPayload(TypedDict):
+    index: int
+    function_call: dict
+    order_id: int
+    workshop_id: int
+    missing_before_verdict: frozenset
+
 
 class VerificationAgent:
     def __init__(
@@ -41,11 +86,53 @@ class VerificationAgent:
         order_repo: OrderRepository,
         trust_repo: TrustRepository,
         verification_repo: VerificationRepository,
+        checkpointer: BaseCheckpointSaver,
     ) -> None:
         self._client = client
         self._orders = order_repo
         self._trust = trust_repo
         self._verifications = verification_repo
+        self._checkpointer = checkpointer
+        self._graph = self._build_graph()
+        self._recursion_limit = 6 * settings.verification_max_loop_iterations + 5
+
+    def _build_graph(self):
+        graph = StateGraph(_VerifyState)
+        graph.add_node("model", self._node_model)
+        graph.add_node("submit", self._node_submit)
+        graph.add_node("nudge", self._node_nudge)
+        graph.add_node("execute_tool", self._node_execute_tool, input_schema=_ToolCallPayload)
+        graph.add_node("collect_tool_results", self._node_collect_tool_results)
+        graph.add_node("stricter_retry", self._node_stricter_retry)
+        graph.add_node("human_review", self._node_human_review)
+
+        graph.add_edge(START, "model")
+        graph.add_conditional_edges(
+            "model",
+            self._route_after_model,
+            {"submit": "submit", "nudge": "nudge", "stricter_retry": "stricter_retry"},
+        )
+        graph.add_edge("submit", END)
+        graph.add_conditional_edges(
+            "nudge", self._route_after_turn, {"model": "model", "stricter_retry": "stricter_retry"}
+        )
+        graph.add_edge("execute_tool", "collect_tool_results")
+        graph.add_conditional_edges(
+            "collect_tool_results",
+            self._route_after_turn,
+            {"model": "model", "stricter_retry": "stricter_retry"},
+        )
+        graph.add_conditional_edges(
+            "stricter_retry", self._route_stricter_retry_result, {"end": END, "human_review": "human_review"}
+        )
+        graph.add_conditional_edges(
+            "human_review", self._route_after_human_review, {"end": END, "model": "model"}
+        )
+        return graph.compile(checkpointer=self._checkpointer)
+
+    @staticmethod
+    def _thread_id(sublot_id: int) -> str:
+        return f"verification-sublot-{sublot_id}"
 
     async def verify(
         self,
@@ -89,96 +176,217 @@ class VerificationAgent:
             }
         ]
 
-        called_tools: set[str] = set()
+        initial_state: _VerifyState = {
+            "contents": contents,
+            "called_tools": set(),
+            "iteration": 0,
+            "order_id": order_id,
+            "workshop_id": workshop_id,
+            "sublot_id": sublot_id,
+        }
+        final_state = await self._run_graph(initial_state, sublot_id=sublot_id)
+        return self._extract_result_or_pause(final_state, sublot_id)
 
-        for iteration in range(settings.verification_max_loop_iterations):
-            try:
-                response = await self._call_api(contents)
-            except _RETRYABLE_API_ERRORS as exc:
-                raise VerificationError(
-                    f"Sublot {sublot_id}: Gemini API failed after "
-                    f"{settings.verification_retry_attempts} retries: {exc}"
-                ) from exc
-            candidate = response.candidates[0]
-            parts = candidate.content.parts or []
-            function_calls = [p for p in parts if p.function_call]
-            missing_before_verdict = _REQUIRED_TOOLS_BEFORE_VERDICT - called_tools
+    async def is_resumable(self, sublot_id: int) -> bool:
+        config = {"configurable": {"thread_id": self._thread_id(sublot_id)}}
+        snapshot = await self._graph.aget_state(config)
+        return any(task.interrupts for task in snapshot.tasks)
 
-            for part in function_calls:
-                if part.function_call.name == "submit_verdict" and not missing_before_verdict:
-                    return self._parse_verdict(dict(part.function_call.args or {}))
+    async def resume_with_guidance(self, sublot_id: int, guidance: str) -> VerificationOutput:
+        final_state = await self._run_graph(
+            Command(resume={"mode": "guidance", "text": guidance}), sublot_id=sublot_id
+        )
+        return self._extract_result_or_pause(final_state, sublot_id)
 
-            if not function_calls:
-                if candidate.finish_reason == types.FinishReason.STOP:
-                    logger.warning(
-                        "VerificationAgent finished without a verdict on sublot %d "
-                        "(iteration %d/%d)",
-                        sublot_id, iteration + 1, settings.verification_max_loop_iterations,
-                    )
-                    break
-                contents.append(candidate.content)
-                contents.append({
-                    "role": "user",
-                    "parts": [{
-                        "text": (
-                            "Please continue — call get_order_spec, get_workshop_history, "
-                            "and then submit_verdict."
-                        ),
-                    }],
-                })
-                continue
-
-            response_parts = []
-            extra_parts: list[dict] = []
-            for part in function_calls:
-                name = part.function_call.name
-                if name == "submit_verdict":
-                    result: dict = {
-                        "error": (
-                            "Cannot submit a verdict yet — call these tools "
-                            f"first: {', '.join(sorted(missing_before_verdict))}."
-                        ),
-                    }
-                    tool_extra_parts: list[dict] = []
-                else:
-                    result, tool_extra_parts = await self._execute_tool(
-                        name, order_id, workshop_id
-                    )
-                    if name in _REQUIRED_TOOLS_BEFORE_VERDICT:
-                        called_tools.add(name)
-                response_parts.append({
-                    "function_response": {
-                        "name": name,
-                        "response": {"result": result},
-                    },
-                })
-                extra_parts.extend(tool_extra_parts)
-
-            contents.append(candidate.content)
-            contents.append({"role": "user", "parts": response_parts + extra_parts})
-
-        return await self._retry_with_stricter_prompt(contents, sublot_id, called_tools)
-
-    async def _retry_with_stricter_prompt(
-        self, contents: list[dict], sublot_id: int, called_tools: set[str]
+    async def resume_with_verdict(
+        self, sublot_id: int, verdict: VerificationOutput
     ) -> VerificationOutput:
-        contents.append({
-            "role": "user",
-            "parts": [{
-                "text": (
-                    "You have the order spec and workshop history already. "
-                    "Return your verdict now by calling submit_verdict."
-                ),
-            }],
-        })
+        await self._run_graph(
+            Command(
+                resume={
+                    "mode": "verdict",
+                    "verdict": {
+                        "verdict": verdict.verdict,
+                        "fault_party": verdict.fault_party,
+                        "confidence": verdict.confidence,
+                        "explanation": verdict.explanation,
+                    },
+                }
+            ),
+            sublot_id=sublot_id,
+        )
+        return verdict
+
+    async def _run_graph(self, input_: dict | Command, *, sublot_id: int) -> dict:
+        config = {
+            "configurable": {"thread_id": self._thread_id(sublot_id)},
+            "recursion_limit": self._recursion_limit,
+        }
         try:
-            response = await self._call_api(contents)
+            return await self._graph.ainvoke(input_, config=config)
+        except GraphRecursionError as exc:
+            raise NeedsHumanReviewError(
+                f"Sublot {sublot_id}: LangGraph recursion limit "
+                f"({self._recursion_limit}) hit before a verdict was "
+                f"reached — this indicates the graph did not respect its "
+                f"own iteration budget.",
+                thread_id=None,
+            ) from exc
+
+    def _extract_result_or_pause(self, final_state: dict, sublot_id: int) -> VerificationOutput:
+        if "__interrupt__" in final_state:
+            payload = final_state["__interrupt__"][0].value
+            missing = ", ".join(payload.get("missing_tools", [])) or "none — no verdict call at all"
+            raise NeedsHumanReviewError(
+                f"Sublot {sublot_id}: agent could not reach a grounded verdict "
+                f"on its own (missing: {missing}) and is paused for human review "
+                f"— resumable via resume_with_guidance/resume_with_verdict.",
+                thread_id=self._thread_id(sublot_id),
+            )
+        return final_state["result"]
+
+    async def _node_model(self, state: _VerifyState) -> dict:
+        try:
+            response = await self._call_api(state["contents"])
         except _RETRYABLE_API_ERRORS as exc:
             raise VerificationError(
-                f"Sublot {sublot_id}: Gemini API failed on stricter-prompt retry: {exc}"
+                f"Sublot {state['sublot_id']}: Gemini API failed after "
+                f"{settings.verification_retry_attempts} retries: {exc}"
             ) from exc
         candidate = response.candidates[0]
+        parts = candidate.content.parts or []
+        function_calls: list[dict] = []
+        model_turn_parts: list[dict] = []
+        for part in parts:
+            if part.function_call:
+                fc = {"name": part.function_call.name, "args": dict(part.function_call.args or {})}
+                function_calls.append(fc)
+                part_dict: dict = {"function_call": fc}
+                if part.thought_signature:
+                    part_dict["thought_signature"] = base64.standard_b64encode(
+                        part.thought_signature
+                    ).decode()
+                model_turn_parts.append(part_dict)
+            elif part.text:
+                model_turn_parts.append({"text": part.text})
+        return {
+            "finish_reason_is_stop": candidate.finish_reason == types.FinishReason.STOP,
+            "function_calls": function_calls,
+            "model_turn": {"role": "model", "parts": model_turn_parts},
+            "iteration": state["iteration"] + 1,
+        }
+
+    @staticmethod
+    def _route_after_model(state: _VerifyState):
+        function_calls = state["function_calls"]
+        called_tools = state["called_tools"]
         missing_before_verdict = _REQUIRED_TOOLS_BEFORE_VERDICT - called_tools
+
+        for fc in function_calls:
+            if fc["name"] == "submit_verdict" and not missing_before_verdict:
+                return "submit"
+
+        if not function_calls:
+            if state["finish_reason_is_stop"]:
+                return "stricter_retry"
+            return "nudge"
+
+        return [
+            Send(
+                "execute_tool",
+                _ToolCallPayload(
+                    index=i,
+                    function_call=fc,
+                    order_id=state["order_id"],
+                    workshop_id=state["workshop_id"],
+                    missing_before_verdict=missing_before_verdict,
+                ),
+            )
+            for i, fc in enumerate(function_calls)
+        ]
+
+    async def _node_submit(self, state: _VerifyState) -> dict:
+        for fc in state["function_calls"]:
+            if fc["name"] == "submit_verdict":
+                return {"result": self._parse_verdict(fc["args"])}
+        raise VerificationError(
+            f"Sublot {state['sublot_id']}: routed to submit without a qualifying "
+            f"submit_verdict call — this indicates a routing bug"
+        )
+
+    async def _node_nudge(self, state: _VerifyState) -> dict:
+        return {
+            "contents": [
+                state["model_turn"],
+                {"role": "user", "parts": [{"text": _NUDGE_TEXT}]},
+            ],
+        }
+
+    async def _node_execute_tool(self, payload: _ToolCallPayload) -> dict:
+        fc = payload["function_call"]
+        name = fc["name"]
+        if name == "submit_verdict":
+            result: dict = {
+                "error": (
+                    "Cannot submit a verdict yet — call these tools first: "
+                    f"{', '.join(sorted(payload['missing_before_verdict']))}."
+                ),
+            }
+            extra_parts: list[dict] = []
+            called_name = None
+        else:
+            result, extra_parts = await self._execute_tool(
+                name, payload["order_id"], payload["workshop_id"]
+            )
+            called_name = name if name in _REQUIRED_TOOLS_BEFORE_VERDICT else None
+        return {
+            "tool_results": [
+                {
+                    "index": payload["index"],
+                    "response_part": {
+                        "function_response": {"name": name, "response": {"result": result}},
+                    },
+                    "extra_parts": extra_parts,
+                    "called_name": called_name,
+                }
+            ],
+        }
+
+    async def _node_collect_tool_results(self, state: _VerifyState) -> dict:
+        results = sorted(state.get("tool_results") or [], key=lambda r: r["index"])
+        called_tools = set(state["called_tools"])
+        response_parts = []
+        extra_parts: list[dict] = []
+        for r in results:
+            response_parts.append(r["response_part"])
+            extra_parts.extend(r["extra_parts"])
+            if r["called_name"]:
+                called_tools.add(r["called_name"])
+        return {
+            "contents": [
+                state["model_turn"],
+                {"role": "user", "parts": response_parts + extra_parts},
+            ],
+            "called_tools": called_tools,
+            "tool_results": None,
+        }
+
+    @staticmethod
+    def _route_after_turn(state: _VerifyState) -> str:
+        if state["iteration"] >= settings.verification_max_loop_iterations:
+            return "stricter_retry"
+        return "model"
+
+    async def _node_stricter_retry(self, state: _VerifyState) -> dict:
+        stricter_turn = [{"role": "user", "parts": [{"text": _STRICTER_RETRY_TEXT}]}]
+        try:
+            response = await self._call_api(state["contents"] + stricter_turn)
+        except _RETRYABLE_API_ERRORS as exc:
+            raise VerificationError(
+                f"Sublot {state['sublot_id']}: Gemini API failed on stricter-prompt retry: {exc}"
+            ) from exc
+        candidate = response.candidates[0]
+        missing_before_verdict = _REQUIRED_TOOLS_BEFORE_VERDICT - state["called_tools"]
 
         for part in candidate.content.parts or []:
             if (
@@ -186,14 +394,76 @@ class VerificationAgent:
                 and part.function_call.name == "submit_verdict"
                 and not missing_before_verdict
             ):
-                return self._parse_verdict(dict(part.function_call.args or {}))
+                return {
+                    "contents": stricter_turn,
+                    "result": self._parse_verdict(dict(part.function_call.args or {})),
+                }
+        return {"contents": stricter_turn}
 
-        raise NeedsHumanReviewError(
-            f"Sublot {sublot_id}: loop exhausted after "
-            f"{settings.verification_max_loop_iterations} iterations plus one "
-            f"stricter-prompt retry, still no verdict grounded in required "
-            f"tool calls (missing: {', '.join(sorted(missing_before_verdict)) or 'none — no verdict call at all'})"
+    @staticmethod
+    def _route_stricter_retry_result(state: _VerifyState) -> str:
+        return "end" if "result" in state else "human_review"
+
+    async def _node_human_review(self, state: _VerifyState) -> dict:
+        missing = _REQUIRED_TOOLS_BEFORE_VERDICT - state["called_tools"]
+        decision = interrupt(
+            {
+                "sublot_id": state["sublot_id"],
+                "reason": "loop_exhausted_no_grounded_verdict",
+                "missing_tools": sorted(missing),
+            }
         )
+        if decision.get("mode") == "verdict":
+            return {"result": self._parse_verdict(decision["verdict"])}
+        guidance_text = decision.get("text", "")
+        return {
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [
+                        {
+                            "text": (
+                                f"A human reviewer added this guidance: {guidance_text}\n"
+                                "Please reconsider and call submit_verdict once you're confident."
+                            ),
+                        }
+                    ],
+                }
+            ],
+            "iteration": 0,
+        }
+
+    @staticmethod
+    def _route_after_human_review(state: _VerifyState) -> str:
+        return "end" if "result" in state else "model"
+
+    async def translate_explanation(self, explanation: str, language_code: str) -> str | None:
+        language_name = _LANGUAGE_NAMES.get(language_code, language_code)
+        try:
+            response = await self._client.aio.models.generate_content(
+                model=settings.verification_model,
+                contents=[{
+                    "role": "user",
+                    "parts": [{
+                        "text": (
+                            f"Translate the following product quality note into "
+                            f"natural, plain {language_name} for a small workshop "
+                            f"owner to read. Return only the translated text, "
+                            f"nothing else.\n\n{explanation}"
+                        ),
+                    }],
+                }],
+                config=types.GenerateContentConfig(max_output_tokens=settings.verification_max_tokens),
+            )
+            parts = response.candidates[0].content.parts or []
+            translated = "".join(p.text for p in parts if p.text).strip()
+            return translated or None
+        except Exception:
+            logger.warning(
+                "Translation to %s failed for a verification explanation — "
+                "falling back to English only", language_name, exc_info=True,
+            )
+            return None
 
     @retry(
         retry=retry_if_exception_type(_RETRYABLE_API_ERRORS),
@@ -274,20 +544,22 @@ class VerificationAgent:
         image_data = self._encode_image(str(path))
         return (
             {"found": True, "product_type": product_type},
-            [{
-                "inline_data": {
-                    "mime_type": self._media_type(str(path)),
-                    "data": image_data,
-                },
-            }],
+            [
+                {
+                    "inline_data": {
+                        "mime_type": self._media_type(str(path)),
+                        "data": image_data,
+                    },
+                }
+            ],
         )
 
     @staticmethod
     def _parse_verdict(tool_input: dict) -> VerificationOutput:
         try:
-            verdict     = tool_input["verdict"]
+            verdict = tool_input["verdict"]
             fault_party = tool_input["fault_party"]
-            confidence  = float(tool_input["confidence"])
+            confidence = float(tool_input["confidence"])
             explanation = str(tool_input["explanation"])
         except (KeyError, TypeError, ValueError) as exc:
             raise VerificationError(

@@ -6,12 +6,15 @@ from config import settings
 from db.connection import get_pool
 from db.repositories.notification_repository import NotificationRepository
 from db.repositories.order_repository import OrderRepository
+from db.repositories.otp_repository import OtpRepository
 from db.repositories.payment_repository import PaymentRepository
 from db.repositories.sublot_repository import SublotRepository
 from db.repositories.trust_repository import TrustRepository
 from db.repositories.verification_repository import VerificationRepository
 from db.repositories.workshop_repository import WorkshopRepository
+from services.auth.otp_service import OtpService
 from services.coordinator import OrderCoordinator, build_coordinator
+from services.messaging.gateway import ConsoleNotificationGateway, NotificationGateway
 
 
 
@@ -53,6 +56,7 @@ def trust_repo() -> TrustRepository:
     scorer = TrustScorer(TrustScorerConfig(
         window_size=settings.trust_window_size,
         cold_start_score=settings.trust_cold_start_score,
+        recency_decay=settings.trust_recency_decay,
     ))
     return TrustRepository(get_pool(), scorer)
 
@@ -67,6 +71,21 @@ def payment_repo() -> PaymentRepository:
 
 def notification_repo() -> NotificationRepository:
     return NotificationRepository(get_pool())
+
+
+def otp_repo() -> OtpRepository:
+    return OtpRepository(get_pool())
+
+
+_notification_gateway: NotificationGateway = ConsoleNotificationGateway()
+
+
+def notification_gateway() -> NotificationGateway:
+    return _notification_gateway
+
+
+def otp_service() -> OtpService:
+    return OtpService(otp_repo(), workshop_repo(), notification_gateway())
 
 
 _coordinator: OrderCoordinator | None = None

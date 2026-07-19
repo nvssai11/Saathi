@@ -3,24 +3,16 @@ uvicorn[standard]==0.32.0
 asyncpg==0.30.0
 aiokafka==0.11.0
 google-genai==2.12.1
+langgraph==1.2.9
+langgraph-checkpoint-postgres==3.1.0
+psycopg[binary]==3.3.4
+psycopg-pool==3.3.1
 pulp==2.9.0
 tenacity==9.0.0
-# pydantic/pydantic-settings bumped from 2.9.0/2.5.0 — google-genai==2.12.1
-# requires pydantic>=2.12.5.
 pydantic==2.12.5
 pydantic-settings==2.10.1
 python-multipart==0.0.12
 python-dotenv==1.0.1
 pytest==8.3.0
-# anyio, not pytest-asyncio: the test suite uses @pytest.mark.anyio
-# throughout (see CLAUDE.md's own "Running Tests" note). anyio was
-# previously only available transitively via fastapi/starlette's own
-# dependency tree, and pytest-asyncio was declared here but never actually
-# installed/used — a fresh `pip install -r requirements.txt` would have
-# pulled a dependency nothing imports, while the one the tests genuinely
-# need had no direct pin of its own.
 anyio==4.13.0
-# google-genai requires httpx>=0.28.1,<1.0.0 — bumped from 0.27.0 (the pin
-# that predates the Gemini migration) to satisfy both that and fastapi's
-# own TestClient, which is compatible across this range.
 httpx==0.28.1

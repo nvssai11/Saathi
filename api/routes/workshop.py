@@ -106,6 +106,8 @@ async def list_my_sublots(
             qty_assigned=r["qty_assigned"],
             delivered_qty=r["delivered_qty"],
             status=r["status"],
+            explanation=r["explanation"],
+            explanations=r["explanations"] or {},
         )
         for r in records
     ]
@@ -209,16 +211,22 @@ async def get_my_trust_score(
     score = trust.scorer.compute_score(events)
     grade = trust.scorer.grade(score)
     explanation = trust.scorer.score_explanation(events)
+    on_time_rate = trust.scorer.compute_on_time_rate(events)
+    defect_rate = trust.scorer.compute_defect_rate(events)
+    window_count = trust.scorer.window_count(events)
 
+    recent_with_explanations = await trust.get_recent_events_with_explanations(workshop_id, limit=5)
     history = [
         TrustEventSummary(
-            sublot_id=e.sublot_id,
-            on_time=e.on_time,
-            defect_found=e.defect_found,
-            fault_party=e.fault_party,
-            date=e.created_at,
+            sublot_id=r["sublot_id"],
+            on_time=r["on_time"],
+            defect_found=r["defect_found"],
+            fault_party=r["fault_party"],
+            date=r["created_at"],
+            explanation=r["explanation"],
+            explanations=r["explanations"] or {},
         )
-        for e in events[:5]
+        for r in recent_with_explanations
     ]
 
     return TrustScoreResponse(
@@ -226,6 +234,9 @@ async def get_my_trust_score(
         score=score,
         grade=grade,
         explanation=explanation,
+        on_time_rate=on_time_rate,
+        defect_rate=defect_rate,
+        window_count=window_count,
         history=history,
     )
 

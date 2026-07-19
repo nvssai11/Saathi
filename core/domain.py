@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -69,6 +69,8 @@ class VerificationOutput:
 class VerificationCompletionResult:
     status: str
     explanation: str | None
+    explanations: dict[str, str] = field(default_factory=dict)
+    fault_party: str | None = None
 
 
 @dataclass(frozen=True)
@@ -80,6 +82,7 @@ class SubLotRecord:
     delivered_qty: int | None
     cost_per_unit: Decimal
     status: str
+    delivered_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -96,6 +99,7 @@ class PaymentDraft:
     base_amount: Decimal
     penalty: Decimal
     net_amount: Decimal
+    buyer_billable_amount: Decimal
 
 
 @dataclass

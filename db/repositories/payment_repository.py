@@ -21,8 +21,9 @@ class PaymentRepository:
         await self._pool.executemany(
             """
             INSERT INTO payments
-                (order_id, workshop_id, sublot_id, base_amount, penalty, net_amount)
-            VALUES ($1, $2, $3, $4, $5, $6)
+                (order_id, workshop_id, sublot_id, base_amount, penalty, net_amount,
+                 buyer_billable_amount)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             ON CONFLICT (sublot_id) DO NOTHING
             """,
             [
@@ -33,6 +34,7 @@ class PaymentRepository:
                     payment.base_amount,
                     payment.penalty,
                     payment.net_amount,
+                    payment.buyer_billable_amount,
                 )
                 for sublot_id, payment in zip(sublot_ids, result.payments)
             ],

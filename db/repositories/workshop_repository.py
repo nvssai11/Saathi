@@ -117,6 +117,18 @@ class WorkshopRepository:
             workshop_id, product_type, available_qty, cost_per_unit, lead_time_days,
         )
 
+    async def get_by_phone(self, phone_number: str) -> asyncpg.Record | None:
+        return await self._pool.fetchrow(
+            "SELECT workshop_id, name FROM workshops WHERE phone_number = $1",
+            phone_number,
+        )
+
+    async def get_phone(self, workshop_id: int) -> str | None:
+        return await self._pool.fetchval(
+            "SELECT phone_number FROM workshops WHERE workshop_id = $1",
+            workshop_id,
+        )
+
     async def increment_spec_disputes(self, workshop_id: int) -> None:
         await self._pool.execute(
             "UPDATE workshops SET spec_disputes = spec_disputes + 1 WHERE workshop_id = $1",

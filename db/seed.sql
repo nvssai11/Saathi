@@ -1,51 +1,16 @@
--- Saathi seed data — 6 SFURTI workshops + 1 factory fallback.
--- Designed for the live hackathon demo: order qty 200, quality_min 2, deadline 30 days.
--- The allocation engine should split across WS-1..WS-3; WS-4 has too-low trust
--- (below 0.30 threshold), WS-5 too-low quality, WS-6 misses deadline.
-
 TRUNCATE trust_score_cache, payments, verification_results, sublots, trust_events,
          orders, workshop_capacity, workshops RESTART IDENTITY CASCADE;
 
--- ── Workshops ─────────────────────────────────────────────────────────────────
-
-INSERT INTO workshops (workshop_id, name, quality_tier, is_factory, spec_disputes) VALUES
-    (1,  'Pune Textile Cluster A',     4, FALSE, 0),
-    (2,  'Nagpur Weaving Unit',         3, FALSE, 0),
-    (3,  'Nashik Finishing Co.',        3, FALSE, 1),
-    (4,  'Aurangabad Stitching Ltd.',   2, FALSE, 0),   -- trust too low after bad history
-    (5,  'Kolhapur Fabric Works',       1, FALSE, 0),   -- quality_tier 1 < quality_min 2
-    (6,  'Solapur Embroidery House',    3, FALSE, 0),   -- lead_time = 45 > deadline
-    (99, 'Central Factory (Fallback)', 5, TRUE,  0);
+INSERT INTO workshops (workshop_id, name, quality_tier, is_factory, spec_disputes, phone_number) VALUES
+    (1,  'Pune Textile Cluster A',     4, FALSE, 0, '+919810000001'),
+    (2,  'Nagpur Weaving Unit',         3, FALSE, 0, '+919810000002'),
+    (3,  'Nashik Finishing Co.',        3, FALSE, 1, '+919810000003'),
+    (4,  'Aurangabad Stitching Ltd.',   2, FALSE, 0, '+919810000004'),
+    (5,  'Kolhapur Fabric Works',       1, FALSE, 0, '+919810000005'),
+    (6,  'Solapur Embroidery House',    3, FALSE, 0, '+919810000006'),
+    (99, 'Central Factory (Fallback)', 5, TRUE,  0, NULL);
 
 SELECT setval('workshops_workshop_id_seq', 99);
-
--- ── Capacity ─────────────────────────────────────────────────────────────────
--- Covers every product_type in the frontend's static catalog
--- (frontend/src/data/catalog.ts) — the buyer shop UI is a real multi-category
--- storefront, not a single-SKU demo, so every listing a buyer can click
--- through to must actually be orderable end to end.
---
--- cost_per_unit is quality_tier-correlated per real workshop (added
--- 2026-07-17): WS5 (tier 1) cheapest, WS4 (tier 2) next, WS2/WS3/WS6
--- (tier 3) the middle band, WS1 (tier 4) priciest of the real workshops —
--- a rank-preserving reassignment of each product's original six prices, not
--- new numbers, so every product's price range/order-of-magnitude and every
--- workshop's available_qty/lead_time_days are unchanged; only which real
--- workshop gets which of the six prices moved. Before this, cost had no
--- relationship to quality_tier at all (WS3, tier 3, was pricier than WS1,
--- tier 4) — AllocationEngine's MIP is a pure cost-minimizer within the
--- eligible set, so quality_min already narrowed *which* workshops qualify,
--- but a buyer paying for higher quality within an already-eligible pool
--- wasn't reliably paying more for it. Factory (workshop 99, tier 5) is left
--- untouched — it's deliberately the expensive no-coordination fallback, not
--- part of this correlation.
---
--- At the default demo order (quality_min 2, 21-day+ deadline), eligibility
--- is unchanged — still WS1/WS2/WS3 only, same as before (WS4 trust-filtered,
--- WS5 quality-filtered, WS6 deadline-filtered) — but the *split proportions*
--- between WS1/WS2/WS3 shift: WS1 (tier 4, highest trust) is now the most
--- expensive of the three instead of a mid-priced option, so it wins a
--- smaller share of the MIP's cost-minimized allocation than before.
 
 INSERT INTO workshop_capacity (workshop_id, product_type, available_qty, reserved_qty, cost_per_unit, lead_time_days) VALUES
 
@@ -113,13 +78,11 @@ INSERT INTO workshop_capacity (workshop_id, product_type, available_qty, reserve
     (1,  'jute-door-mat',  82, 0,  32.21, 14),
     (99, 'jute-door-mat', 9999, 0, 46.00,  7);
 
--- ── Trust score cache (pre-seeded; reflect 8-event history for active workshops) ─
-
 INSERT INTO trust_score_cache (workshop_id, score, grade, computed_at) VALUES
     (1,  0.910, 'A', now()),
     (2,  0.780, 'B', now()),
     (3,  0.720, 'B', now()),
-    (4,  0.250, 'D', now()),   -- below 0.30 threshold — excluded by filter
-    (5,  0.800, 'B', now()),   -- excluded by quality, not trust
-    (6,  0.850, 'A', now()),   -- excluded by deadline, not trust
-    (99, 1.000, 'A', now());   -- factory always trusted
+    (4,  0.250, 'D', now()),
+    (5,  0.800, 'B', now()),
+    (6,  0.850, 'A', now()),
+    (99, 1.000, 'A', now());

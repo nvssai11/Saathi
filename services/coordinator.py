@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import date, datetime, timezone
 from decimal import Decimal
@@ -13,9 +14,11 @@ from core.allocation.engine import AllocationConfig, AllocationEngine
 from core.domain import (
     OrderSpec,
     SubLotDraft,
+    SubLotRecord,
     SublotAssignment,
     TrustEvent,
     VerificationCompletionResult,
+    VerificationOutput,
 )
 from core.exceptions import InvalidStateTransitionError, NeedsHumanReviewError, VerificationError
 from core.protocols import IAllocationEngine, ISettlementCalculator, ITrustScorer
@@ -29,6 +32,7 @@ from db.repositories.trust_repository import TrustRepository
 from db.repositories.verification_repository import VerificationRepository
 from db.repositories.workshop_repository import WorkshopRepository
 from observability import set_correlation_id
+from services.messaging.gateway import ConsoleNotificationGateway, NotificationGateway
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +51,7 @@ class OrderCoordinator:
         trust_scorer: ITrustScorer,
         settlement_calculator: ISettlementCalculator,
         verification_agent: VerificationAgent,
+        notification_gateway: NotificationGateway,
     ) -> None:
         self._orders = order_repo
         self._workshops = workshop_repo
@@ -59,6 +64,7 @@ class OrderCoordinator:
         self._scorer = trust_scorer
         self._settlement = settlement_calculator
         self._agent = verification_agent
+        self._gateway = notification_gateway
 
     async def on_order_placed(self, order_id: int) -> list[SublotAssignment]:
         logger.info("on_order_placed order_id=%d", order_id)
@@ -129,6 +135,14 @@ class OrderCoordinator:
             qty_assigned=qty_assigned,
         )
 
+        phone = await self._workshops.get_phone(workshop_id)
+        if phone:
+            await self._gateway.send(
+                phone,
+                f"New order on Saathi: {qty_assigned} x {product_type} "
+                f"(sub-lot #{sublot_id}). Open the app to start production.",
+            )
+
     async def on_sublot_delivered(
         self, sublot_id: int, order_id: int, delivered_qty: int
     ) -> None:
@@ -173,7 +187,11 @@ class OrderCoordinator:
             order_row = await self._orders.get(sublot.order_id)
             if order_row:
                 set_correlation_id(str(order_row["correlation_id"]))
-            await self._record_auto_ok_trust_event(sublot_id, sublot.workshop_id)
+            on_time = (
+                self._compute_on_time(sublot.delivered_at, order_row["deadline"])
+                if order_row else False
+            )
+            await self._record_auto_ok_trust_event(sublot_id, sublot.workshop_id, on_time)
             await self._sublots.transition_status(sublot_id, "VERIFIED")
             await self._maybe_start_verifying(sublot.order_id)
             await self._check_terminal_and_settle(sublot.order_id)
@@ -203,61 +221,94 @@ class OrderCoordinator:
         if sublot is None:
             return VerificationCompletionResult(status="NOT_FOUND", explanation=None)
 
-        result: VerificationCompletionResult
-
         try:
             output = await self._agent.verify(
                 photo_path, order_id, sublot.workshop_id, sublot_id, buyer_note=buyer_note,
             )
-            await self._verifications.save(sublot_id, output, photo_path)
-
-            low_confidence_defect = (
-                output.verdict == "DEFECT"
-                and output.confidence < settings.verification_defect_confidence_threshold
-            )
-
-            if low_confidence_defect:
-                await self._sublots.transition_status(sublot_id, "NEEDS_HUMAN_REVIEW")
-                logger.warning(
-                    "Sublot %d: DEFECT verdict at confidence %.2f is below the "
-                    "%.2f auto-apply threshold — flagged for human review instead "
-                    "of penalizing the workshop automatically",
-                    sublot_id, output.confidence, settings.verification_defect_confidence_threshold,
-                )
-                result = VerificationCompletionResult(
-                    status="NEEDS_HUMAN_REVIEW", explanation=output.explanation,
-                )
-            else:
-                new_status = "VERIFIED" if output.verdict in ("OK", "SPEC_AMBIGUITY") else "FAILED"
-                await self._sublots.transition_status(sublot_id, new_status)
-
-                on_time = True
-                trust_event = TrustEvent(
-                    workshop_id=sublot.workshop_id,
-                    sublot_id=sublot_id,
-                    on_time=on_time,
-                    defect_found=output.verdict == "DEFECT",
-                    fault_party=output.fault_party,
-                    created_at=datetime.now(tz=timezone.utc),
-                )
-                await self._trust.append_event(trust_event)
-
-                if output.verdict == "SPEC_AMBIGUITY":
-                    await self._workshops.increment_spec_disputes(sublot.workshop_id)
-
-                result = VerificationCompletionResult(status=new_status, explanation=output.explanation)
-
         except NeedsHumanReviewError:
             await self._sublots.transition_status(sublot_id, "NEEDS_HUMAN_REVIEW")
             logger.warning("Sublot %d flagged NEEDS_HUMAN_REVIEW", sublot_id)
             result = VerificationCompletionResult(status="NEEDS_HUMAN_REVIEW", explanation=None)
+            await self._check_terminal_and_settle(order_id)
+            return result
         except VerificationError as exc:
             logger.error("VerificationError sublot %d: %s", sublot_id, exc)
             await self._sublots.transition_status(sublot_id, "NEEDS_HUMAN_REVIEW")
             result = VerificationCompletionResult(status="NEEDS_HUMAN_REVIEW", explanation=None)
+            await self._check_terminal_and_settle(order_id)
+            return result
 
+        result = await self._apply_verification_output(sublot, output, photo_path)
         await self._check_terminal_and_settle(order_id)
         return result
+
+    async def _apply_verification_output(
+        self,
+        sublot: SubLotRecord,
+        output: VerificationOutput,
+        photo_path: str | None,
+    ) -> VerificationCompletionResult:
+        explanations = await self._translate_explanation(output.explanation)
+        await self._verifications.save(sublot.sublot_id, output, photo_path, explanations)
+
+        low_confidence_defect = (
+            output.verdict == "DEFECT"
+            and output.confidence < settings.verification_defect_confidence_threshold
+        )
+
+        if low_confidence_defect:
+            await self._sublots.transition_status(sublot.sublot_id, "NEEDS_HUMAN_REVIEW")
+            logger.warning(
+                "Sublot %d: DEFECT verdict at confidence %.2f is below the "
+                "%.2f auto-apply threshold — flagged for human review instead "
+                "of penalizing the workshop automatically",
+                sublot.sublot_id, output.confidence, settings.verification_defect_confidence_threshold,
+            )
+            return VerificationCompletionResult(
+                status="NEEDS_HUMAN_REVIEW", explanation=output.explanation, explanations=explanations,
+            )
+
+        new_status = "VERIFIED" if output.verdict in ("OK", "SPEC_AMBIGUITY") else "FAILED"
+        await self._sublots.transition_status(sublot.sublot_id, new_status)
+
+        order_row = await self._orders.get(sublot.order_id)
+        on_time = (
+            self._compute_on_time(sublot.delivered_at, order_row["deadline"])
+            if order_row else False
+        )
+
+        trust_event = TrustEvent(
+            workshop_id=sublot.workshop_id,
+            sublot_id=sublot.sublot_id,
+            on_time=on_time,
+            defect_found=output.verdict == "DEFECT",
+            fault_party=output.fault_party,
+            created_at=datetime.now(tz=timezone.utc),
+        )
+        await self._trust.append_event(trust_event)
+
+        if output.verdict == "SPEC_AMBIGUITY":
+            await self._workshops.increment_spec_disputes(sublot.workshop_id)
+
+        return VerificationCompletionResult(
+            status=new_status, explanation=output.explanation, explanations=explanations,
+            fault_party=output.fault_party,
+        )
+
+    @staticmethod
+    def _compute_on_time(delivered_at: datetime | None, deadline: date) -> bool:
+        if delivered_at is None:
+            return False
+        return delivered_at.date() <= deadline
+
+    async def _translate_explanation(self, explanation: str) -> dict[str, str]:
+        languages = settings.translation_target_languages
+        if not languages:
+            return {}
+        results = await asyncio.gather(
+            *(self._agent.translate_explanation(explanation, code) for code in languages)
+        )
+        return {code: text for code, text in zip(languages, results) if text}
 
     async def on_defect_flagged(
         self,
@@ -289,7 +340,13 @@ class OrderCoordinator:
             buyer_note=f"{defect_qty} units — {description}",
         )
 
-    async def retry_verification(self, sublot_id: int) -> VerificationCompletionResult:
+    async def retry_verification(
+        self,
+        sublot_id: int,
+        *,
+        guidance: str | None = None,
+        verdict: VerificationOutput | None = None,
+    ) -> VerificationCompletionResult:
         sublot = await self._sublots.get(sublot_id)
         if sublot is None:
             raise InvalidStateTransitionError(f"Sublot {sublot_id} not found")
@@ -299,20 +356,61 @@ class OrderCoordinator:
                 "VERIFYING or awaiting NEEDS_HUMAN_REVIEW can be retried"
             )
 
+        order_row = await self._orders.get(sublot.order_id)
+        if order_row:
+            set_correlation_id(str(order_row["correlation_id"]))
+
+        if guidance is not None or verdict is not None:
+            return await self._resume_verification(sublot, guidance, verdict)
+
         photo_path = self._find_defect_photo(sublot_id, sublot.order_id)
         if photo_path is None:
             raise InvalidStateTransitionError(
                 f"No defect photo found on disk for sublot {sublot_id} — cannot retry"
             )
 
-        order_row = await self._orders.get(sublot.order_id)
-        if order_row:
-            set_correlation_id(str(order_row["correlation_id"]))
-
-        logger.info("Admin retry_verification sublot_id=%d photo_path=%s", sublot_id, photo_path)
+        logger.info("Admin retry_verification (fresh) sublot_id=%d photo_path=%s", sublot_id, photo_path)
         return await self.on_verification_complete(
             sublot_id=sublot_id, order_id=sublot.order_id, photo_path=photo_path,
         )
+
+    async def _resume_verification(
+        self,
+        sublot: SubLotRecord,
+        guidance: str | None,
+        verdict: VerificationOutput | None,
+    ) -> VerificationCompletionResult:
+        if not await self._agent.is_resumable(sublot.sublot_id):
+            raise InvalidStateTransitionError(
+                f"Sublot {sublot.sublot_id} has no paused verification to resume — "
+                "retry without guidance/verdict to start a fresh verification instead"
+            )
+
+        logger.info(
+            "Admin resume_verification sublot_id=%d mode=%s",
+            sublot.sublot_id, "verdict" if verdict is not None else "guidance",
+        )
+        try:
+            if verdict is not None:
+                output = await self._agent.resume_with_verdict(sublot.sublot_id, verdict)
+            else:
+                output = await self._agent.resume_with_guidance(sublot.sublot_id, guidance)
+        except NeedsHumanReviewError:
+            await self._sublots.transition_status(sublot.sublot_id, "NEEDS_HUMAN_REVIEW")
+            result = VerificationCompletionResult(status="NEEDS_HUMAN_REVIEW", explanation=None)
+            await self._check_terminal_and_settle(sublot.order_id)
+            return result
+        except VerificationError as exc:
+            logger.error("VerificationError (resume) sublot %d: %s", sublot.sublot_id, exc)
+            await self._sublots.transition_status(sublot.sublot_id, "NEEDS_HUMAN_REVIEW")
+            result = VerificationCompletionResult(status="NEEDS_HUMAN_REVIEW", explanation=None)
+            await self._check_terminal_and_settle(sublot.order_id)
+            return result
+
+        photo_path = self._find_defect_photo(sublot.sublot_id, sublot.order_id)
+        result = await self._apply_verification_output(sublot, output, photo_path)
+        await self._check_terminal_and_settle(sublot.order_id)
+        return result
 
     @staticmethod
     def _find_defect_photo(sublot_id: int, order_id: int) -> str | None:
@@ -402,12 +500,10 @@ class OrderCoordinator:
         new_sublot_id = sublot_ids[0]
 
         await self._workshops.reserve_capacity(factory["workshop_id"], product_type, shortfall_qty)
-        await self._sublots.mark_delivered(new_sublot_id, shortfall_qty)
-        await self._workshops.release_capacity(factory["workshop_id"], product_type, shortfall_qty)
-        await self._sublots.transition_status(new_sublot_id, "VERIFIED")
 
         logger.warning(
-            "Order %d: backfilled shortfall of %d units via new factory sublot %d",
+            "Order %d: shortfall of %d units assigned to factory as sublot %d — "
+            "awaiting a real delivery, not auto-completed",
             order_id, shortfall_qty, new_sublot_id,
         )
 
@@ -454,22 +550,23 @@ class OrderCoordinator:
         )
 
     async def _record_auto_ok_trust_event(
-        self, sublot_id: int, workshop_id: int
+        self, sublot_id: int, workshop_id: int, on_time: bool
     ) -> None:
         await self._trust.append_event(TrustEvent(
             workshop_id=workshop_id,
             sublot_id=sublot_id,
-            on_time=True,
+            on_time=on_time,
             defect_found=False,
             fault_party="none",
             created_at=datetime.now(tz=timezone.utc),
         ))
 
 
-def build_coordinator(pool) -> OrderCoordinator:
+def build_coordinator(pool, checkpointer) -> OrderCoordinator:
     trust_scorer = TrustScorer(TrustScorerConfig(
         window_size=settings.trust_window_size,
         cold_start_score=settings.trust_cold_start_score,
+        recency_decay=settings.trust_recency_decay,
     ))
     order_repo = OrderRepository(pool)
     trust_repo = TrustRepository(pool, trust_scorer)
@@ -494,12 +591,13 @@ def build_coordinator(pool) -> OrderCoordinator:
         settlement_calculator=SettlementCalculator(SettlementConfig(
             platform_fee_percentage=settings.platform_fee_percentage,
             penalty_non_delivery_percentage=settings.penalty_non_delivery_percentage,
-            penalty_workshop_defect_percentage=settings.penalty_workshop_defect_percentage,
         )),
         verification_agent=VerificationAgent(
             client=genai.Client(api_key=settings.gemini_api_key),
             order_repo=order_repo,
             trust_repo=trust_repo,
             verification_repo=verification_repo,
+            checkpointer=checkpointer,
         ),
+        notification_gateway=ConsoleNotificationGateway(),
     )

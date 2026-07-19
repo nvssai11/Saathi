@@ -41,7 +41,13 @@ _BUYER_STATUS_LABELS: dict[str, str] = {
 }
 
 
-def to_buyer_status_label(internal_status: str) -> str:
+def to_buyer_status_label(
+    internal_status: str, sublots_verified: int = 0, sublots_failed: int = 0
+) -> str:
+    if internal_status == "CLOSED" and sublots_failed > 0:
+        if sublots_verified == 0:
+            return "Order failed quality check"
+        return "Delivered — with quality issues"
     return _BUYER_STATUS_LABELS.get(internal_status, internal_status)
 
 
@@ -54,23 +60,28 @@ class OrderStatusResponse(BaseModel):
     sublots_delivered: int
     sublots_verified: int
     sublots_failed: int
+    has_defect_photo: bool = False
 
     @classmethod
     def from_db(
         cls,
         order_row,
         sublot_rows: list,
+        has_defect_photo: bool = False,
     ) -> "OrderStatusResponse":
         statuses = [s.status for s in sublot_rows]
+        sublots_verified = sum(1 for s in statuses if s == "VERIFIED")
+        sublots_failed = sum(1 for s in statuses if s == "FAILED")
         return cls(
             order_id=order_row["order_id"],
             correlation_id=str(order_row["correlation_id"]),
-            status=to_buyer_status_label(order_row["status"]),
+            status=to_buyer_status_label(order_row["status"], sublots_verified, sublots_failed),
             total_qty=order_row["total_qty"],
             sublots_total=len(sublot_rows),
             sublots_delivered=sum(1 for s in statuses if s in ("DELIVERED", "VERIFIED")),
-            sublots_verified=sum(1 for s in statuses if s == "VERIFIED"),
-            sublots_failed=sum(1 for s in statuses if s == "FAILED"),
+            sublots_verified=sublots_verified,
+            sublots_failed=sublots_failed,
+            has_defect_photo=has_defect_photo,
         )
 
 
@@ -149,6 +160,8 @@ class SubLotSummary(BaseModel):
     qty_assigned: int
     delivered_qty: int | None
     status: str
+    explanation: str | None = None
+    explanations: dict[str, str] = Field(default_factory=dict)
 
 
 class TrustEventSummary(BaseModel):
@@ -157,6 +170,8 @@ class TrustEventSummary(BaseModel):
     defect_found: bool
     fault_party: str
     date: datetime
+    explanation: str | None = None
+    explanations: dict[str, str] = Field(default_factory=dict)
 
 
 class TrustScoreResponse(BaseModel):
@@ -164,6 +179,9 @@ class TrustScoreResponse(BaseModel):
     score: float
     grade: str
     explanation: list[str]
+    on_time_rate: float
+    defect_rate: float
+    window_count: int
     history: list[TrustEventSummary]
 
 
@@ -174,6 +192,27 @@ class NotificationItem(BaseModel):
     product_type: str
     qty_assigned: int
     created_at: datetime
+
+
+class OtpRequestRequest(BaseModel):
+    phone_number: str = Field(..., min_length=8, max_length=20)
+
+
+class OtpRequestResponse(BaseModel):
+    phone_number: str
+    expires_in_seconds: int
+    demo_code: str | None = None
+
+
+class OtpVerifyRequest(BaseModel):
+    phone_number: str = Field(..., min_length=8, max_length=20)
+    code: str = Field(..., min_length=4, max_length=8)
+
+
+class OtpVerifyResponse(BaseModel):
+    token: str
+    workshop_id: int
+    workshop_name: str
 
 
 class ReviewItem(BaseModel):
@@ -188,3 +227,30 @@ class ReviewItem(BaseModel):
     fault_party: str | None = None
     confidence: float | None = None
     explanation: str | None = None
+    explanations: dict[str, str] = Field(default_factory=dict)
+
+
+class AllocationItem(BaseModel):
+    sublot_id: int
+    workshop_id: int
+    workshop_name: str
+    is_factory: bool
+    qty_assigned: int
+    delivered_qty: int | None = None
+    cost_per_unit: Decimal
+    status: str
+
+
+class OrderAllocationResponse(BaseModel):
+    order_id: int
+    total_qty: int
+    workshop_count: int
+    sublots: list[AllocationItem]
+
+
+class RetryVerificationRequest(BaseModel):
+    guidance: str | None = Field(default=None, min_length=1, max_length=1000)
+    verdict: str | None = Field(default=None, pattern="^(OK|DEFECT|SPEC_AMBIGUITY)$")
+    fault_party: str | None = Field(default=None, pattern="^(workshop|buyer|none)$")
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    explanation: str | None = Field(default=None, min_length=1, max_length=1000)

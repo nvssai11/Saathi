@@ -5,8 +5,9 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from api.dependencies import get_coordinator, order_repo, require_admin, sublot_repo
-from api.models import ReviewItem
+from api.models import AllocationItem, OrderAllocationResponse, ReviewItem, RetryVerificationRequest
 from config import settings
+from core.domain import VerificationOutput
 from core.exceptions import InvalidStateTransitionError
 from db.repositories.order_repository import OrderRepository
 from db.repositories.sublot_repository import SublotRepository
@@ -58,6 +59,44 @@ async def reconcile_stuck_orders(
     }
 
 
+@router.get("/orders/{order_id}/allocation", response_model=OrderAllocationResponse)
+async def get_order_allocation(
+    order_id: int,
+    _: None = Depends(require_admin),
+    orders: OrderRepository = Depends(order_repo),
+    sublots: SublotRepository = Depends(sublot_repo),
+):
+    order_row = await orders.get(order_id)
+    if order_row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "ORDER_NOT_FOUND", "message": f"Order {order_id} does not exist"},
+        )
+
+    rows = await sublots.list_for_order_admin(order_id)
+    items = [
+        AllocationItem(
+            sublot_id=r["sublot_id"],
+            workshop_id=r["workshop_id"],
+            workshop_name=r["workshop_name"],
+            is_factory=r["is_factory"],
+            qty_assigned=r["qty_assigned"],
+            delivered_qty=r["delivered_qty"],
+            cost_per_unit=r["cost_per_unit"],
+            status=r["status"],
+        )
+        for r in rows
+    ]
+    workshop_count = len({i.workshop_id for i in items if not i.is_factory})
+
+    return OrderAllocationResponse(
+        order_id=order_id,
+        total_qty=order_row["total_qty"],
+        workshop_count=workshop_count,
+        sublots=items,
+    )
+
+
 @router.get("/sublots/needs-review", response_model=list[ReviewItem])
 async def list_sublots_needing_review(
     _: None = Depends(require_admin),
@@ -77,6 +116,7 @@ async def list_sublots_needing_review(
             fault_party=r["fault_party"],
             confidence=float(r["confidence"]) if r["confidence"] is not None else None,
             explanation=r["explanation"],
+            explanations=r["explanations"] or {},
         )
         for r in rows
     ]
@@ -85,11 +125,24 @@ async def list_sublots_needing_review(
 @router.post("/sublots/{sublot_id}/retry-verification", status_code=status.HTTP_200_OK)
 async def retry_sublot_verification(
     sublot_id: int,
+    body: RetryVerificationRequest | None = None,
     _: None = Depends(require_admin),
     coordinator: OrderCoordinator = Depends(get_coordinator),
 ):
+    body = body or RetryVerificationRequest()
+    verdict = None
+    if body.verdict is not None:
+        verdict = VerificationOutput(
+            verdict=body.verdict,
+            fault_party=body.fault_party or "none",
+            confidence=body.confidence if body.confidence is not None else 1.0,
+            explanation=body.explanation or "Verdict entered directly by an admin reviewer.",
+        )
+
     try:
-        result = await coordinator.retry_verification(sublot_id)
+        result = await coordinator.retry_verification(
+            sublot_id, guidance=body.guidance, verdict=verdict,
+        )
     except InvalidStateTransitionError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

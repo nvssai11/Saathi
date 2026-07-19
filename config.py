@@ -9,12 +9,9 @@ class Settings(BaseSettings):
     database_url: str = "postgresql://saathi:saathi@localhost:5432/saathi"
     db_pool_min_size: int = 5
     db_pool_max_size: int = 20
+    checkpointer_pool_min_size: int = 2
+    checkpointer_pool_max_size: int = 5
     kafka_bootstrap_servers: str = "localhost:9092"
-    # Aiven (or any managed Kafka) deployment: set kafka_security_protocol to
-    # "SASL_SSL", fill kafka_sasl_username/password + kafka_ssl_cafile (the
-    # service's CA cert, e.g. ca.pem downloaded from the Aiven console) in
-    # .env. Local Docker Compose Kafka stays PLAINTEXT — no other code changes
-    # needed either way, see Settings.kafka_client_kwargs below.
     kafka_security_protocol: str = "PLAINTEXT"
     kafka_sasl_mechanism: str = "PLAIN"
     kafka_sasl_username: str = ""
@@ -38,9 +35,11 @@ class Settings(BaseSettings):
     auto_verify_sweep_interval_seconds: int = 5
     verification_defect_confidence_threshold: float = 0.90
     reference_image_directory: str = "./assets/reference_photos"
+    translation_target_languages: list[str] = Field(default_factory=lambda: ["hi"])
     trust_minimum_threshold: float = 0.30
     trust_cold_start_score: float = 0.500
-    trust_window_size: int = 10
+    trust_window_size: int = 30
+    trust_recency_decay: float = 0.9
     trust_penalty_factor: float = 0.5
     spec_disputes_threshold: int = 3
     spec_disputes_mip_penalty_factor: float = 0.10
@@ -49,12 +48,16 @@ class Settings(BaseSettings):
     workshop_sublot_list_limit: int = 200
     platform_fee_percentage: Decimal = Decimal("0.05")
     penalty_non_delivery_percentage: Decimal = Decimal("0.20")
-    penalty_workshop_defect_percentage: Decimal = Decimal("0.15")
     buyer_token: str = "buyer-demo-token"
     admin_token: str = "admin-demo-token"
     workshop_tokens_json: str = Field(
         default='{"token-ws-1": 1, "token-ws-2": 2, "token-ws-3": 3, "token-factory": 99}'
     )
+
+    otp_code_length: int = 6
+    otp_expiry_seconds: int = 300
+    otp_max_attempts: int = 5
+    otp_demo_reveal_code: bool = True
 
     upload_directory: str = "./uploads"
     max_upload_size_bytes: int = 10 * 1024 * 1024
@@ -67,11 +70,6 @@ class Settings(BaseSettings):
 
     @property
     def kafka_client_kwargs(self) -> dict:
-        """Extra kwargs to spread into every AIOKafkaProducer/Consumer call.
-
-        Centralized so the four call sites (producer + 3 workers) don't each
-        duplicate SASL/SSL setup and can't drift out of sync.
-        """
         kwargs: dict = {"security_protocol": self.kafka_security_protocol}
         if self.kafka_security_protocol in ("SSL", "SASL_SSL"):
             kwargs["ssl_context"] = create_ssl_context(

@@ -28,6 +28,12 @@ class ITrustScorer(Protocol):
     def score_explanation(self, events: list[TrustEvent]) -> list[str]:
         ...
 
+    def compute_on_time_rate(self, events: list[TrustEvent]) -> float:
+        ...
+
+    def window_count(self, events: list[TrustEvent]) -> int:
+        ...
+
 
 @runtime_checkable
 class ISettlementCalculator(Protocol):

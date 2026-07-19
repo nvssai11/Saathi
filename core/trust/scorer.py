@@ -20,6 +20,7 @@ _WEIGHT_QUALITY = 0.4
 class TrustScorerConfig:
     window_size: int
     cold_start_score: float
+    recency_decay: float = 0.9
 
 
 class TrustScorer:
@@ -41,6 +42,15 @@ class TrustScorer:
             return 0.0
         _, _, defect_rate = self._window_and_rates(events)
         return round(defect_rate, 4)
+
+    def compute_on_time_rate(self, events: list[TrustEvent]) -> float:
+        if not events:
+            return 0.0
+        _, on_time_rate, _ = self._window_and_rates(events)
+        return round(on_time_rate, 4)
+
+    def window_count(self, events: list[TrustEvent]) -> int:
+        return len(self._recent_window(events))
 
     def grade(self, score: float) -> str:
         for threshold, letter in _GRADE_THRESHOLDS:
@@ -65,7 +75,7 @@ class TrustScorer:
         self, events: list[TrustEvent]
     ) -> tuple[list[TrustEvent], float, float]:
         window  = self._recent_window(events)
-        weights = self._descending_weights(len(window))
+        weights = self._decay_weights(len(window), self._config.recency_decay)
 
         on_time_rate = self._weighted_mean([e.on_time for e in window], weights)
         defect_rate  = self._weighted_mean(
@@ -83,8 +93,8 @@ class TrustScorer:
         return sorted_events[-self._config.window_size:]
 
     @staticmethod
-    def _descending_weights(n: int) -> list[float]:
-        raw = [float(i + 1) for i in range(n)]
+    def _decay_weights(n: int, decay: float) -> list[float]:
+        raw = [decay ** (n - 1 - i) for i in range(n)]
         total = sum(raw)
         return [w / total for w in raw]
 

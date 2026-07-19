@@ -54,9 +54,10 @@ class SublotRepository:
         return await self._pool.fetch(
             """
             SELECT s.sublot_id, s.order_id, s.qty_assigned, s.delivered_qty, s.status,
-                   o.product_type, o.deadline
+                   o.product_type, o.deadline, vr.explanation, vr.explanations
               FROM sublots s
               JOIN orders o USING (order_id)
+              LEFT JOIN verification_results vr USING (sublot_id)
              WHERE s.workshop_id = $1
              ORDER BY s.sublot_id DESC
              LIMIT $2
@@ -68,7 +69,8 @@ class SublotRepository:
         result = await self._pool.execute(
             """
             UPDATE sublots
-               SET delivered_qty = $1, status = 'DELIVERED', updated_at = now()
+               SET delivered_qty = $1, status = 'DELIVERED', updated_at = now(),
+                   delivered_at = now()
              WHERE sublot_id = $2
                AND status IN ('ASSIGNED', 'IN_PRODUCTION')
             """,
@@ -113,18 +115,40 @@ class SublotRepository:
         )
         return [r["sublot_id"] for r in rows]
 
+    async def list_for_order_admin(self, order_id: int) -> list[asyncpg.Record]:
+        return await self._pool.fetch(
+            """
+            SELECT s.sublot_id, s.workshop_id, w.name AS workshop_name, w.is_factory,
+                   s.qty_assigned, s.delivered_qty, s.cost_per_unit, s.status
+              FROM sublots s
+              JOIN workshops w USING (workshop_id)
+             WHERE s.order_id = $1
+             ORDER BY s.sublot_id
+            """,
+            order_id,
+        )
+
     async def list_needing_review(self) -> list[asyncpg.Record]:
         return await self._pool.fetch(
             """
             SELECT s.sublot_id, s.order_id, s.workshop_id, s.qty_assigned, s.status, s.updated_at,
                    o.product_type,
-                   vr.verdict, vr.fault_party, vr.confidence, vr.explanation
+                   vr.verdict, vr.fault_party, vr.confidence, vr.explanation, vr.explanations
               FROM sublots s
               JOIN orders o USING (order_id)
               LEFT JOIN verification_results vr USING (sublot_id)
              WHERE s.status IN ('VERIFYING', 'NEEDS_HUMAN_REVIEW')
              ORDER BY s.updated_at ASC
             """
+        )
+
+    async def cancel_for_order(self, order_id: int) -> None:
+        await self._pool.execute(
+            """
+            UPDATE sublots SET status = 'CANCELLED', updated_at = now()
+             WHERE order_id = $1 AND status = 'ASSIGNED'
+            """,
+            order_id,
         )
 
     async def transition_status(self, sublot_id: int, new_status: str) -> None:
@@ -167,4 +191,5 @@ class SublotRepository:
             delivered_qty=row["delivered_qty"],
             cost_per_unit=Decimal(str(row["cost_per_unit"])),
             status=row["status"],
+            delivered_at=row["delivered_at"],
         )

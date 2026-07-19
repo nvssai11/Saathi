@@ -18,7 +18,7 @@ class TrustRepository:
         return self._scorer
 
     async def append_event(self, event: TrustEvent) -> None:
-        result = await self._pool.execute(
+        await self._pool.execute(
             """
             INSERT INTO trust_events
                 (workshop_id, sublot_id, on_time, defect_found, fault_party,
@@ -32,14 +32,11 @@ class TrustRepository:
                         ELSE 'SPEC_AMBIGUITY'
                     END::trust_event_type,
                     $6)
-            ON CONFLICT (sublot_id) DO NOTHING
             """,
             event.workshop_id, event.sublot_id,
             event.on_time, event.defect_found, event.fault_party,
             event.created_at,
         )
-        if result == "INSERT 0":
-            return
         await self._refresh_cache(event.workshop_id)
 
     async def get_recent_events(
@@ -71,6 +68,22 @@ class TrustRepository:
     ) -> list[str]:
         events = await self.get_recent_events(workshop_id, limit=window_size)
         return self._scorer.score_explanation(events)
+
+    async def get_recent_events_with_explanations(
+        self, workshop_id: int, limit: int
+    ) -> list[asyncpg.Record]:
+        return await self._pool.fetch(
+            """
+            SELECT te.sublot_id, te.on_time, te.defect_found, te.fault_party,
+                   te.created_at, vr.explanation, vr.explanations
+              FROM trust_events te
+              LEFT JOIN verification_results vr USING (sublot_id)
+             WHERE te.workshop_id = $1
+             ORDER BY te.created_at DESC
+             LIMIT $2
+            """,
+            workshop_id, limit,
+        )
 
     async def _refresh_cache(self, workshop_id: int) -> None:
         window_size = self._scorer.window_size

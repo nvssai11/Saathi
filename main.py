@@ -1,5 +1,9 @@
 import asyncio
 import logging
+import sys
+
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
@@ -13,8 +17,10 @@ from api.errors import (
     validation_exception_handler,
 )
 from api.routes.admin import router as admin_router
+from api.routes.auth import router as auth_router
 from api.routes.buyer import router as buyer_router
 from api.routes.workshop import router as workshop_router
+from db.checkpointer import close_checkpointer, create_checkpointer
 from db.connection import close_pool, create_pool, get_pool
 from events.producer import get_producer, start_producer, stop_producer
 from observability import CorrelationIdFilter
@@ -34,9 +40,10 @@ logger = logging.getLogger(__name__)
 
 async def lifespan(app: FastAPI):
     pool = await create_pool()
+    checkpointer = await create_checkpointer()
     await start_producer()
 
-    coordinator = build_coordinator(pool)
+    coordinator = build_coordinator(pool, checkpointer)
     set_coordinator(coordinator)
 
     allocation_worker = AllocationWorker(coordinator)
@@ -61,6 +68,7 @@ async def lifespan(app: FastAPI):
             pass
 
     await stop_producer()
+    await close_checkpointer()
     await close_pool()
     logger.info("Saathi API stopped")
 
@@ -83,6 +91,7 @@ app.add_exception_handler(HTTPException, http_exception_handler)
 app.add_exception_handler(RequestValidationError, validation_exception_handler)
 app.add_exception_handler(Exception, unhandled_exception_handler)
 
+app.include_router(auth_router)
 app.include_router(buyer_router)
 app.include_router(workshop_router)
 app.include_router(admin_router)

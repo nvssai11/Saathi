@@ -6,6 +6,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
+from fastapi.responses import FileResponse
 
 from api.dependencies import (
     get_coordinator,
@@ -13,6 +14,7 @@ from api.dependencies import (
     payment_repo,
     sublot_repo,
     require_buyer,
+    verification_repo,
     workshop_repo,
 )
 from api.uploads import save_defect_photo
@@ -29,9 +31,11 @@ from api.models import (
 )
 from config import settings
 from core.exceptions import InvalidStateTransitionError
+from core.media_types import SUPPORTED_IMAGE_EXTENSIONS
 from db.repositories.order_repository import OrderRepository
 from db.repositories.payment_repository import PaymentRepository
 from db.repositories.sublot_repository import SublotRepository
+from db.repositories.verification_repository import VerificationRepository
 from db.repositories.workshop_repository import WorkshopRepository
 from events.producer import publish_order_placed
 from services.coordinator import OrderCoordinator
@@ -113,6 +117,7 @@ async def get_order_status(
     _: None = Depends(require_buyer),
     orders: OrderRepository = Depends(order_repo),
     sublots: SublotRepository = Depends(sublot_repo),
+    verifications: VerificationRepository = Depends(verification_repo),
 ):
     order_row = await orders.get(order_id)
     if order_row is None:
@@ -120,7 +125,37 @@ async def get_order_status(
     response.headers["X-Correlation-ID"] = str(order_row["correlation_id"])
 
     sublot_rows = await sublots.list_for_order(order_id)
-    return OrderStatusResponse.from_db(order_row, sublot_rows)
+    photo_path = await verifications.get_latest_photo_path_for_order(order_id)
+    return OrderStatusResponse.from_db(order_row, sublot_rows, has_defect_photo=photo_path is not None)
+
+
+@router.get("/{order_id}/defect-photo")
+async def get_order_defect_photo(
+    order_id: int,
+    _: None = Depends(require_buyer),
+    orders: OrderRepository = Depends(order_repo),
+    verifications: VerificationRepository = Depends(verification_repo),
+):
+    order_row = await orders.get(order_id)
+    if order_row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+
+    photo_path = await verifications.get_latest_photo_path_for_order(order_id)
+    if photo_path is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No defect photo on file for this order",
+        )
+
+    path = Path(photo_path)
+    if not path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Defect photo is on record but missing from disk",
+        )
+
+    media_type = SUPPORTED_IMAGE_EXTENSIONS.get(path.suffix.lower(), "application/octet-stream")
+    return FileResponse(path, media_type=media_type)
 
 
 @router.get("/{order_id}/quote", response_model=OrderQuoteResponse)
@@ -196,7 +231,7 @@ async def get_order_invoice(
 
     payment_rows = await payments.get_for_order(order_id)
     buyer_base = sum(
-        (Decimal(str(p["base_amount"])) for p in payment_rows), Decimal("0")
+        (Decimal(str(p["buyer_billable_amount"])) for p in payment_rows), Decimal("0")
     )
     platform_fee = (buyer_base * settings.platform_fee_percentage).quantize(Decimal("0.01"))
     buyer_total = buyer_base + platform_fee
@@ -249,6 +284,8 @@ async def flag_order_defect(
         "defect_qty": defect_qty,
         "verification_status": result.status,
         "explanation": result.explanation,
+        "explanations": result.explanations,
+        "fault_party": result.fault_party,
     }
 
 
@@ -276,3 +313,4 @@ async def cancel_order(
         await workshops.release_capacity(
             s.workshop_id, order_row["product_type"], s.qty_assigned
         )
+    await sublots.cancel_for_order(order_id)
