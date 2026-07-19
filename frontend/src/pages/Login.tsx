@@ -8,6 +8,24 @@ import LanguageToggle from "../components/LanguageToggle";
 
 const RESEND_COOLDOWN_SECONDS = 30;
 
+// Static demo bearer tokens — same values as config.py's default
+// BUYER_TOKEN/ADMIN_TOKEN/WORKSHOP_TOKENS_JSON, already public knowledge
+// within this project's v0 demo auth model (documented in .env.example and
+// CLAUDE.md). Purely a hackathon-demo convenience so a presenter doesn't
+// need to remember/type these live; not something a real deployment would
+// ship with real credentials.
+const DEMO_WORKSHOP_TOKENS: { label: string; token: string }[] = [
+  { label: "WS-1", token: "token-ws-1" },
+  { label: "WS-2", token: "token-ws-2" },
+  { label: "WS-3", token: "token-ws-3" },
+  { label: "WS-4", token: "token-ws-4" },
+  { label: "WS-5", token: "token-ws-5" },
+  { label: "WS-6", token: "token-ws-6" },
+];
+const DEMO_FACTORY_TOKEN = "token-factory";
+const DEMO_BUYER_TOKEN = "buyer-demo-token";
+const DEMO_ADMIN_TOKEN = "admin-demo-token";
+
 type WorkshopAuthMode = "otp" | "token";
 type OtpStep = "phone" | "code";
 
@@ -56,6 +74,16 @@ export default function Login() {
 
   function fullPhone(): string {
     return `+91${phone.replace(/\D/g, "")}`;
+  }
+
+  function fillDemoToken(demoToken: string) {
+    if (submitting) return;
+    setError(null);
+    if (role === "workshop") {
+      setWorkshopAuthMode("token");
+    }
+    setToken(demoToken);
+    setShowToken(true);
   }
 
   function goToDestination(nextRole: Role) {
@@ -363,6 +391,50 @@ export default function Login() {
             >
               {t("login.roleAdmin")}
             </button>
+          </div>
+        </div>
+
+        <div className="field">
+          <label>{t("login.demoQuickLogin")}</label>
+          <div className="action-row">
+            {role === "buyer" && (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => fillDemoToken(DEMO_BUYER_TOKEN)}
+              >
+                {t("login.demoBuyerBtn")}
+              </button>
+            )}
+            {role === "admin" && (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => fillDemoToken(DEMO_ADMIN_TOKEN)}
+              >
+                {t("login.demoAdminBtn")}
+              </button>
+            )}
+            {role === "workshop" &&
+              DEMO_WORKSHOP_TOKENS.map((w) => (
+                <button
+                  key={w.token}
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => fillDemoToken(w.token)}
+                >
+                  {w.label}
+                </button>
+              ))}
+            {role === "workshop" && (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => fillDemoToken(DEMO_FACTORY_TOKEN)}
+              >
+                {t("login.demoFactoryBtn")}
+              </button>
+            )}
           </div>
         </div>
 

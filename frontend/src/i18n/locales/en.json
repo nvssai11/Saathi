@@ -53,7 +53,11 @@
     "tokenInvalid": "That token isn't valid for a {{role}} account.",
     "networkError": "Couldn't reach Saathi right now. Check your connection and try again.",
     "phoneNotRegistered": "That number isn't registered to a workshop yet. Ask your cluster coordinator to add it.",
-    "resendNetworkError": "Couldn't send a new code — check your connection and try again."
+    "resendNetworkError": "Couldn't send a new code — check your connection and try again.",
+    "demoQuickLogin": "Quick demo login",
+    "demoBuyerBtn": "Demo buyer",
+    "demoAdminBtn": "Demo admin",
+    "demoFactoryBtn": "Factory"
   },
   "status": {
     "ASSIGNED": "Assigned",
