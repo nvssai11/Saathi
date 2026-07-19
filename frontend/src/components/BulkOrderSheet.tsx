@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   CatalogItem,
   QUALITY_TIERS,
@@ -13,6 +14,12 @@ interface BulkOrderSheetProps {
   onSubmit: (args: { totalQty: number; qualityMin: number; deadline: string; buyerRef: string }) => Promise<void>;
 }
 
+const TIER_KEY: Record<number, { label: string; blurb: string }> = {
+  2: { label: "tierStandard", blurb: "tierStandardBlurb" },
+  4: { label: "tierPremium", blurb: "tierPremiumBlurb" },
+  5: { label: "tierExport", blurb: "tierExportBlurb" },
+};
+
 function defaultDeadline(): string {
   const d = new Date();
   d.setDate(d.getDate() + 21);
@@ -26,6 +33,7 @@ function minDeadline(): string {
 }
 
 export default function BulkOrderSheet({ item, onClose, onSubmit }: BulkOrderSheetProps) {
+  const { t } = useTranslation();
   const [qtyText, setQtyText] = useState(String(item.moq));
   const parsedQty = Number(qtyText);
   const validQty = qtyText.trim() !== "" && Number.isFinite(parsedQty) && parsedQty >= item.moq ? parsedQty : null;
@@ -64,7 +72,7 @@ export default function BulkOrderSheet({ item, onClose, onSubmit }: BulkOrderShe
       return;
     }
     if (deadline < minDeadline()) {
-      setError("Deadline must be at least a day out.");
+      setError(t("bulkOrder.deadlineTooSoon"));
       return;
     }
     setSubmitting(true);
@@ -77,7 +85,7 @@ export default function BulkOrderSheet({ item, onClose, onSubmit }: BulkOrderShe
         buyerRef: buyerRef.trim() || `SAATHI-${Date.now().toString().slice(-8)}`,
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not place order.");
+      setError(err instanceof Error ? err.message : t("bulkOrder.couldNotPlace"));
       setSubmitting(false);
     }
   }
@@ -112,9 +120,9 @@ export default function BulkOrderSheet({ item, onClose, onSubmit }: BulkOrderShe
           {error && <div className="banner banner-error">{error}</div>}
 
           <div className="field">
-            <label htmlFor="bulk-qty">Bulk quantity</label>
+            <label htmlFor="bulk-qty">{t("bulkOrder.bulkQuantity")}</label>
             <div className="qty-stepper">
-              <button type="button" onClick={() => step(-item.moq)} aria-label="Decrease quantity">
+              <button type="button" onClick={() => step(-item.moq)} aria-label={t("bulkOrder.decreaseQty")}>
                 −
               </button>
               <input
@@ -128,31 +136,31 @@ export default function BulkOrderSheet({ item, onClose, onSubmit }: BulkOrderShe
                 onBlur={() => commitQty(validQty ?? item.moq)}
                 aria-invalid={validQty === null}
               />
-              <button type="button" onClick={() => step(item.moq)} aria-label="Increase quantity">
+              <button type="button" onClick={() => step(item.moq)} aria-label={t("bulkOrder.increaseQty")}>
                 +
               </button>
             </div>
             <span className="muted">
               {validQty === null
-                ? `Enter at least ${item.moq} units.`
-                : `Minimum order quantity is ${item.moq} units.`}
+                ? t("bulkOrder.enterAtLeast", { moq: item.moq })
+                : t("bulkOrder.minimumIs", { moq: item.moq })}
             </span>
           </div>
 
           <div className="field">
-            <label>Quality tier</label>
+            <label>{t("bulkOrder.qualityTier")}</label>
             <div className="tier-options">
-              {QUALITY_TIERS.map((t) => (
+              {QUALITY_TIERS.map((qt) => (
                 <button
                   type="button"
-                  key={t.value}
-                  className={`tier-option ${tier === t.value ? "active" : ""}`}
-                  aria-pressed={tier === t.value}
-                  onClick={() => setTier(t.value)}
+                  key={qt.value}
+                  className={`tier-option ${tier === qt.value ? "active" : ""}`}
+                  aria-pressed={tier === qt.value}
+                  onClick={() => setTier(qt.value)}
                 >
-                  <span className="tier-label">{t.label}</span>
-                  <span className="tier-blurb">{t.blurb}</span>
-                  <span className="tier-price">₹{priceForTier(item, t.value)}/unit</span>
+                  <span className="tier-label">{t(`bulkOrder.${TIER_KEY[qt.value]?.label}`, qt.label)}</span>
+                  <span className="tier-blurb">{t(`bulkOrder.${TIER_KEY[qt.value]?.blurb}`, qt.blurb)}</span>
+                  <span className="tier-price">₹{priceForTier(item, qt.value)}/unit</span>
                 </button>
               ))}
             </div>
@@ -160,7 +168,7 @@ export default function BulkOrderSheet({ item, onClose, onSubmit }: BulkOrderShe
 
           <div className="field-row">
             <div className="field">
-              <label htmlFor="deadline">Need it by</label>
+              <label htmlFor="deadline">{t("bulkOrder.needItBy")}</label>
               <input
                 id="deadline"
                 type="date"
@@ -171,10 +179,10 @@ export default function BulkOrderSheet({ item, onClose, onSubmit }: BulkOrderShe
               />
             </div>
             <div className="field">
-              <label htmlFor="buyerRef">Order reference (optional)</label>
+              <label htmlFor="buyerRef">{t("bulkOrder.orderReference")}</label>
               <input
                 id="buyerRef"
-                placeholder="e.g. PO-2026-0417"
+                placeholder={t("bulkOrder.orderReferencePlaceholder")}
                 value={buyerRef}
                 onChange={(e) => setBuyerRef(e.target.value)}
               />
@@ -183,13 +191,16 @@ export default function BulkOrderSheet({ item, onClose, onSubmit }: BulkOrderShe
 
           <button type="submit" className="btn btn-accent btn-block btn-lg" disabled={submitting || validQty === null}>
             {submitting
-              ? "Placing order…"
+              ? t("bulkOrder.placingOrder")
               : validQty === null
-              ? "Enter a valid quantity"
-              : `Place bulk order — ${validQty} units · ~₹${(validQty * tierPrice).toLocaleString("en-IN")}`}
+              ? t("bulkOrder.enterValidQty")
+              : t("bulkOrder.placeBulkOrder", {
+                  qty: validQty,
+                  amount: (validQty * tierPrice).toLocaleString("en-IN"),
+                })}
           </button>
           <button type="button" className="btn btn-ghost btn-block" onClick={onClose}>
-            Cancel
+            {t("bulkOrder.cancel")}
           </button>
         </form>
       </div>

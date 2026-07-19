@@ -1,10 +1,3 @@
-/*
-  Brand palette is Meesho-inspired: "Jamuni" (purple, aspiration) as primary,
-  "Aam" (mango, welcoming) as accent — their 2022 rebrand pairing. Status
-  colors (good/warning/serious/critical) are a separate, fixed semantic set —
-  never reused for brand chrome — always paired with an icon + text label,
-  never color alone.
-*/
 :root {
   --bg: #faf8fc;
   --surface: #ffffff;
@@ -88,8 +81,6 @@ a {
   color: var(--brand-600);
 }
 
-/* ── Layout ─────────────────────────────────────────────────────────────── */
-
 .app-shell {
   min-height: 100vh;
   display: flex;
@@ -149,6 +140,76 @@ a {
   white-space: nowrap;
 }
 
+.lang-toggle {
+  display: flex;
+  border: 1.5px solid var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+  padding: 2px;
+  background: var(--bg);
+}
+
+.lang-toggle button {
+  padding: 0.3rem 0.65rem;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.lang-toggle button.active {
+  background: var(--brand-grad);
+  color: white;
+}
+
+@media (max-width: 640px) {
+  .lang-toggle button {
+    padding: 0.3rem 0.5rem;
+  }
+}
+
+.header-bell {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.2rem;
+  height: 2.2rem;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.header-bell:hover {
+  background: var(--brand-50);
+  color: var(--brand-700);
+}
+
+.header-bell-badge {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--accent-400);
+  color: #4a2c00;
+  font-size: 0.68rem;
+  font-weight: 700;
+  box-shadow: 0 0 0 2px var(--surface);
+}
+
 .help-link {
   color: var(--brand-600);
   font-weight: 700;
@@ -175,8 +236,6 @@ a {
     top: 106px;
   }
 }
-
-/* ── Subnav (Meesho-style category tab row under the header) ─────────────── */
 
 .app-subnav {
   display: flex;
@@ -306,8 +365,6 @@ a {
   color: var(--brand-700);
 }
 
-/* ── Cards & forms ──────────────────────────────────────────────────────── */
-
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -317,9 +374,13 @@ a {
   margin-bottom: 1.4rem;
 }
 
+.auth-card-lang {
+  position: absolute;
+  top: 1.1rem;
+  right: 1.1rem;
+}
+
 .auth-card {
-  /* Fixed 380px overflowed viewports narrower than that (e.g. 360px
-     phones) — min() lets it shrink with a small side margin instead. */
   width: min(380px, calc(100vw - 2.5rem));
   position: relative;
   z-index: 1;
@@ -467,6 +528,44 @@ textarea {
   outline-offset: 1px;
 }
 
+.input-prefix {
+  display: flex;
+  align-items: center;
+  padding: 0 0.7rem;
+  border: 1.5px solid var(--border);
+  border-right: none;
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+  background: var(--neutral-bg);
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.input-with-prefix input {
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  padding-right: 0.85rem;
+}
+
+.otp-code-input {
+  font-size: 1.4rem;
+  letter-spacing: 0.4rem;
+  text-align: center;
+  font-weight: 700;
+}
+
+.auth-alt-action {
+  margin-top: 0.6rem;
+}
+
+.link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--brand-600);
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
 @keyframes btn-spin {
   to {
     transform: rotate(360deg);
@@ -510,8 +609,6 @@ textarea {
   color: white;
   box-shadow: var(--shadow-sm);
 }
-
-/* ── Buttons ────────────────────────────────────────────────────────────── */
 
 .btn {
   display: inline-flex;
@@ -602,8 +699,6 @@ textarea {
   flex-wrap: wrap;
 }
 
-/* ── Tables ─────────────────────────────────────────────────────────────── */
-
 .table-card {
   padding: 0;
 }
@@ -689,6 +784,14 @@ tbody tr:hover td {
   flex-shrink: 0;
 }
 
+.defect-photo-preview {
+  max-width: 100%;
+  max-height: 320px;
+  object-fit: contain;
+  border-radius: var(--radius-sm);
+  border: 1.5px solid var(--border);
+}
+
 .photo-picker-name {
   flex: 1;
   min-width: 0;
@@ -717,12 +820,6 @@ tbody tr:hover td {
   background: var(--brand-grad);
   transition: width 0.15s ease;
 }
-
-/* ── Status pills (icon + label, never color alone) ───────────────────────
-   Semantic roles map order/sublot states onto the fixed status palette:
-   good = success terminal state, critical = failure, warning = needs review,
-   neutral = cancelled. In-progress states use brand purple, not a status hue
-   — "in progress" isn't good/bad, so it must not borrow that channel. */
 
 .status-pill {
   display: inline-flex;
@@ -768,7 +865,6 @@ tbody tr:hover td {
   color: var(--neutral-ink);
 }
 
-/* Direct label matches from raw API status/label strings */
 .status-delivered {
   background: var(--good-bg);
   color: var(--good);
@@ -786,11 +882,6 @@ tbody tr:hover td {
   color: var(--neutral-ink);
 }
 .status-verifying {
-  /* Verification runs synchronously within a single request (see
-     OrderCoordinator.on_verification_complete) — so a sublot observed at
-     rest in VERIFYING, on any screen, means that request crashed before
-     reaching a terminal status. It's never a normal "in progress" state
-     the way IN_PRODUCTION is, so it gets the warning hue, not brand purple. */
   background: var(--warning-bg);
   color: var(--warning);
 }
@@ -822,6 +913,39 @@ tbody tr:hover td {
   color: var(--good);
 }
 
+.ai-reasoning-card {
+  display: flex;
+  gap: 0.7rem;
+  align-items: flex-start;
+  background: var(--brand-50);
+  border: 1px solid var(--brand-100);
+  border-radius: var(--radius);
+  padding: 0.85rem 1rem;
+  margin-top: 0.6rem;
+}
+
+.ai-reasoning-icon {
+  font-size: 1.1rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.ai-reasoning-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--brand-700);
+  margin-bottom: 0.25rem;
+}
+
+.ai-reasoning-text {
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--text);
+  font-style: italic;
+}
+
 .btn-retry {
   background: none;
   border: 1.5px solid currentColor;
@@ -840,16 +964,7 @@ tbody tr:hover td {
   background: rgba(0, 0, 0, 0.06);
 }
 
-/* ── Destructive-action inline confirm ─────────────────────────────────────
-   Reuses the existing expand-to-confirm interaction language (see the
-   inline-form delivery/photo rows) instead of a browser confirm() dialog or
-   a new modal pattern — irreversible actions get a pause step, not a
-   different UI vocabulary. */
-
 .confirm-box {
-  /* Surface + left accent, not a solid critical-bg fill — .btn-danger is a
-     soft pink-on-pink pill that disappeared entirely against a matching
-     critical-bg backdrop in review. */
   background: var(--surface);
   border: 1.5px solid var(--critical-bg);
   border-left: 4px solid var(--critical);
@@ -872,8 +987,6 @@ tbody tr:hover td {
   display: flex;
   gap: 0.6rem;
 }
-
-/* ── Order tracking stepper ─────────────────────────────────────────────── */
 
 .stepper {
   display: flex;
@@ -956,8 +1069,6 @@ tbody tr:hover td {
   color: var(--text);
 }
 
-/* ── Loading skeletons ──────────────────────────────────────────────────── */
-
 @keyframes skeleton-shimmer {
   0% {
     background-position: 200% 0;
@@ -980,8 +1091,6 @@ tbody tr:hover td {
   width: 100%;
   margin: 0.35rem 0;
 }
-
-/* ── Progress & stats ───────────────────────────────────────────────────── */
 
 .stat-row {
   display: grid;
@@ -1025,8 +1134,6 @@ tbody tr:hover td {
   color: var(--brand-700);
 }
 
-/* ── Invoice ────────────────────────────────────────────────────────────── */
-
 .invoice-card {
   display: flex;
   flex-direction: column;
@@ -1047,8 +1154,6 @@ tbody tr:hover td {
   padding-top: 0.75rem;
   margin-top: 0.25rem;
 }
-
-/* ── Trust score ────────────────────────────────────────────────────────── */
 
 .trust-hero {
   text-align: center;
@@ -1106,11 +1211,48 @@ tbody tr:hover td {
   font-weight: 600;
 }
 
-/* ── Workshop: section grouping (urgency-first, not a flat table) ─────────
-   The workshop screens group by "what do I need to do right now" instead of
-   listing every sub-lot/product in one dense table — a workshop owner's
-   real question on opening the app is "what needs me today," not "show me
-   everything." */
+.trust-event-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  padding: 1rem 1.25rem;
+  margin-bottom: 0.75rem;
+}
+
+.trust-event-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.6rem;
+}
+
+.trust-event-sublot {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.92rem;
+  color: var(--text);
+}
+
+.trust-event-date {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.trust-event-tags {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.trust-event-explanation {
+  margin: 0.6rem 0 0;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
 
 .wp-section {
   margin-bottom: 1.7rem;
@@ -1144,8 +1286,6 @@ tbody tr:hover td {
   background: var(--accent-400);
   color: #4a2c00;
 }
-
-/* ── Sub-lot cards (My sub-lots) ────────────────────────────────────────── */
 
 .sublot-card {
   display: flex;
@@ -1184,8 +1324,6 @@ tbody tr:hover td {
   transform: translateY(-1px);
 }
 
-/* ── Home dashboard ─────────────────────────────────────────────────────── */
-
 .home-trust-row {
   display: flex;
   align-items: center;
@@ -1199,6 +1337,11 @@ tbody tr:hover td {
   align-items: center;
   gap: 0.6rem;
   flex-wrap: wrap;
+}
+
+.summary-inline-item {
+  display: inline-flex;
+  align-items: center;
 }
 
 .wp-section .btn-ghost {
@@ -1277,8 +1420,6 @@ tbody tr:hover td {
   padding-top: 0.9rem;
   border-top: 1px dashed var(--border);
 }
-
-/* ── Capacity cards (My capacity) ───────────────────────────────────────── */
 
 .capacity-card {
   background: var(--surface);
@@ -1404,13 +1545,58 @@ tbody tr:hover td {
   color: var(--text-muted);
 }
 
+.info-tip {
+  position: relative;
+  display: inline-flex;
+  vertical-align: middle;
+  margin-left: 0.3rem;
+}
+
+.info-tip-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.3rem;
+  height: 1.3rem;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--neutral-bg);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.info-tip-trigger:hover,
+.info-tip-trigger[aria-expanded="true"] {
+  background: var(--brand-100);
+  color: var(--brand-600);
+}
+
+.info-tip-bubble {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 0.4rem);
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: 15rem;
+  padding: 0.5rem 0.65rem;
+  border-radius: var(--radius-sm);
+  background: var(--text);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 400;
+  line-height: 1.35;
+  text-transform: none;
+  letter-spacing: normal;
+  box-shadow: var(--shadow-md);
+}
+
 .capacity-card-actions {
   margin-top: 0.95rem;
   padding-top: 0.95rem;
   border-top: 1px solid var(--border);
 }
-
-/* ── Notification timeline (Notifications) ─────────────────────────────── */
 
 .notif-list {
   display: flex;
@@ -1515,8 +1701,6 @@ tbody tr:hover td {
   line-height: 1.7;
   color: var(--text);
 }
-
-/* ── Product catalog (Meesho-style shop) ───────────────────────────────── */
 
 .promo-banner {
   display: flex;
@@ -1627,8 +1811,6 @@ tbody tr:hover td {
   border-color: var(--brand-500);
   box-shadow: 0 0 0 3px var(--brand-50);
 }
-
-/* ── Shop layout: filter sidebar + results ─────────────────────────────── */
 
 .shop-layout {
   display: flex;
@@ -1891,8 +2073,6 @@ tbody tr:hover td {
   font-size: 0.76rem;
   color: var(--text-muted);
 }
-
-/* ── Bulk order sheet ───────────────────────────────────────────────────── */
 
 .sheet-overlay {
   position: fixed;

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { ensureUnderBackendLimit } from "../utils/imageCompress";
 
 interface PhotoPickerProps {
@@ -9,6 +10,7 @@ interface PhotoPickerProps {
 }
 
 export default function PhotoPicker({ id, photo, onChange, required }: PhotoPickerProps) {
+  const { t } = useTranslation();
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [compressing, setCompressing] = useState(false);
 
@@ -36,7 +38,7 @@ export default function PhotoPicker({ id, photo, onChange, required }: PhotoPick
   }
 
   if (compressing) {
-    return <span className="muted">Checking photo…</span>;
+    return <span className="muted">{t("photoPicker.checkingPhoto")}</span>;
   }
 
   if (!photo) {
@@ -56,7 +58,7 @@ export default function PhotoPicker({ id, photo, onChange, required }: PhotoPick
       {previewUrl && <img src={previewUrl} alt="" />}
       <span className="photo-picker-name">{photo.name}</span>
       <button type="button" className="btn btn-ghost btn-sm" onClick={() => onChange(null)}>
-        Remove
+        {t("photoPicker.remove")}
       </button>
     </div>
   );

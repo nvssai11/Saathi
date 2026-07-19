@@ -1,38 +1,34 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useAuth } from "../../context/AuthContext";
 import { ApiError, SubLotSummary, workshopApi } from "../../api/client";
 import { useWorkshopData } from "../../context/WorkshopDataContext";
 import Layout from "../../components/Layout";
+import InfoTip from "../../components/InfoTip";
 import { PackageIcon, ClockIcon } from "../../components/icons";
 import { SkeletonCard } from "../../components/Skeleton";
 import { catalogItemFor, formatProductType } from "../../data/catalog";
-import { capacityUrgency, deadlineLabel, deadlineUrgency, daysUntil } from "../../utils/format";
+import {
+  capacityUrgency,
+  deadlineLabel,
+  deadlineUrgency,
+  daysUntil,
+  localizedExplanation,
+} from "../../utils/format";
 
 const DELIVERABLE = new Set(["ASSIGNED", "IN_PRODUCTION"]);
 const ACTIONABLE = new Set(["ASSIGNED", "IN_PRODUCTION", "DELIVERED"]);
 const GRADE_TONE: Record<string, string> = { A: "good", B: "good", C: "warning", D: "critical" };
 
-const STATUS_LABELS: Record<string, string> = {
-  ASSIGNED: "Assigned",
-  IN_PRODUCTION: "In production",
-  DELIVERED: "Delivered",
-  VERIFYING: "Verifying",
-  VERIFIED: "Verified",
-  FAILED: "Failed",
-  NEEDS_HUMAN_REVIEW: "Needs review",
-};
-
-function humanizeStatus(status: string): string {
-  return STATUS_LABELS[status] ?? status;
-}
-
 export default function MySublots() {
+  const { t, i18n } = useTranslation();
   const { token } = useAuth();
   const navigate = useNavigate();
   const { sublots, sublotsError: error, trust, capacity, refresh } = useWorkshopData();
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [openDeliverId, setOpenDeliverId] = useState<number | null>(null);
+  const [confirmDeliverId, setConfirmDeliverId] = useState<number | null>(null);
   const [deliveredQty, setDeliveredQty] = useState<number>(0);
   const [busy, setBusy] = useState(false);
   const [rowMessage, setRowMessage] = useState<{ id: number; text: string } | null>(null);
@@ -55,8 +51,8 @@ export default function MySublots() {
     didHighlightRef.current = true;
     el.scrollIntoView({ behavior: "smooth", block: "center" });
     setFlashId(highlightId);
-    const t = setTimeout(() => setFlashId(null), 2500);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => setFlashId(null), 2500);
+    return () => clearTimeout(timer);
   }, [highlightId, sublots]);
 
   const { actionable, history } = useMemo(() => {
@@ -77,6 +73,7 @@ export default function MySublots() {
 
   function openDeliver(s: SubLotSummary) {
     setOpenDeliverId(s.sublot_id);
+    setConfirmDeliverId(null);
     setDeliveredQty(s.qty_assigned);
     setRowMessage(null);
   }
@@ -91,11 +88,11 @@ export default function MySublots() {
     try {
       await workshopApi.startProduction(token, sublotId);
       refresh();
-      flashSuccess("Marked as in production.");
+      flashSuccess(t("sublots.startedProduction"));
     } catch (err) {
       setRowMessage({
         id: sublotId,
-        text: err instanceof ApiError ? err.message : "Could not start production.",
+        text: err instanceof ApiError ? err.message : t("sublots.startProductionError"),
       });
     } finally {
       setBusy(false);
@@ -108,12 +105,13 @@ export default function MySublots() {
     try {
       await workshopApi.markDelivered(token, sublotId, qty);
       setOpenDeliverId(null);
+      setConfirmDeliverId(null);
       refresh();
-      flashSuccess("Marked delivered — sent for verification.");
+      flashSuccess(t("sublots.markedDelivered"));
     } catch (err) {
       setRowMessage({
         id: sublotId,
-        text: err instanceof ApiError ? err.message : "Could not mark delivered.",
+        text: err instanceof ApiError ? err.message : t("sublots.deliverError"),
       });
     } finally {
       setBusy(false);
@@ -140,18 +138,18 @@ export default function MySublots() {
             <div>
               <div className="sublot-name">{formatProductType(s.product_type)}</div>
               <div className="sublot-ids">
-                Order #{s.order_id} · Sub-lot #{s.sublot_id}
+                {t("sublots.orderSublotIds", { orderId: s.order_id, sublotId: s.sublot_id })}
               </div>
             </div>
             <span className={`status-pill status-${s.status.toLowerCase()}`}>
-              {humanizeStatus(s.status)}
+              {t(`status.${s.status}`, s.status)}
             </span>
           </div>
 
           <div className="sublot-meta-row">
             <span>
-              Qty <strong>{s.qty_assigned}</strong>
-              {s.delivered_qty !== null ? ` (${s.delivered_qty} delivered)` : ""}
+              {t("sublots.qty")} <strong>{s.qty_assigned}</strong>
+              {s.delivered_qty !== null ? ` ${t("sublots.deliveredCount", { count: s.delivered_qty })}` : ""}
             </span>
             {!compact && (
               <span
@@ -160,11 +158,28 @@ export default function MySublots() {
                 }`}
               >
                 <ClockIcon />
-                {deadlineLabel(s.deadline)}
+                {deadlineLabel(s.deadline, t)}
               </span>
             )}
             {compact && <span>{s.deadline}</span>}
           </div>
+
+          {compact && s.status === "FAILED" && s.explanation && (
+            <p className="muted">
+              {t("sublots.failureReason", {
+                reason: localizedExplanation(s.explanation, s.explanations, i18n.language),
+              })}
+            </p>
+          )}
+          {compact && s.status === "NEEDS_HUMAN_REVIEW" && (
+            <p className="muted">
+              {s.explanation
+                ? t("sublots.failureReason", {
+                    reason: localizedExplanation(s.explanation, s.explanations, i18n.language),
+                  })
+                : t("sublots.reviewPending")}
+            </p>
+          )}
 
           {!compact && (
             <div className="sublot-actions">
@@ -174,29 +189,48 @@ export default function MySublots() {
                   disabled={busy}
                   onClick={() => submitStartProduction(s.sublot_id)}
                 >
-                  Start production
+                  {t("sublots.startProduction")}
                 </button>
               )}
-              {DELIVERABLE.has(s.status) && !formOpen && (
+              {DELIVERABLE.has(s.status) && !formOpen && confirmDeliverId !== s.sublot_id && (
                 <>
                   <button
                     className={`btn ${s.status === "IN_PRODUCTION" ? "btn-primary" : "btn-secondary"} btn-sm`}
                     disabled={busy}
-                    onClick={() => submitDeliver(s.sublot_id, s.qty_assigned)}
+                    onClick={() => setConfirmDeliverId(s.sublot_id)}
                   >
-                    Yes, all {s.qty_assigned} delivered
+                    {t("sublots.deliverAll", { qty: s.qty_assigned })}
                   </button>
                   <button className="btn btn-ghost btn-sm" onClick={() => openDeliver(s)}>
-                    Fewer than that
+                    {t("sublots.fewer")}
                   </button>
                 </>
               )}
               {s.status === "DELIVERED" && (
-                <span className="muted">
-                  Delivered — awaiting verification. No action needed from you right now.
-                </span>
+                <span className="muted">{t("sublots.deliveredAwaiting")}</span>
               )}
-              {rowMessage?.id === s.sublot_id && !formOpen && (
+              {rowMessage?.id === s.sublot_id && !formOpen && confirmDeliverId !== s.sublot_id && (
+                <span className="inline-error">{rowMessage.text}</span>
+              )}
+            </div>
+          )}
+
+          {confirmDeliverId === s.sublot_id && (
+            <div className="confirm-box">
+              <p>{t("sublots.confirmDeliverPrompt", { qty: s.qty_assigned })}</p>
+              <div className="confirm-actions">
+                <button
+                  className="btn btn-primary btn-sm"
+                  disabled={busy}
+                  onClick={() => submitDeliver(s.sublot_id, s.qty_assigned)}
+                >
+                  {t("sublots.yesMarkDelivered")}
+                </button>
+                <button className="btn btn-ghost btn-sm" onClick={() => setConfirmDeliverId(null)}>
+                  {t("sublots.noKeepAsIs")}
+                </button>
+              </div>
+              {rowMessage?.id === s.sublot_id && (
                 <span className="inline-error">{rowMessage.text}</span>
               )}
             </div>
@@ -206,7 +240,7 @@ export default function MySublots() {
             <div className="sublot-inline-form">
               <div className="inline-form">
                 <label>
-                  How many did you actually deliver? (out of {s.qty_assigned})
+                  {t("sublots.howManyDelivered", { qty: s.qty_assigned })}
                   <input
                     type="number"
                     min={0}
@@ -220,10 +254,10 @@ export default function MySublots() {
                   disabled={busy}
                   onClick={() => submitDeliver(s.sublot_id, deliveredQty)}
                 >
-                  Confirm
+                  {t("sublots.confirm")}
                 </button>
                 <button className="btn btn-ghost btn-sm" onClick={closeForm}>
-                  Cancel
+                  {t("common.cancel")}
                 </button>
                 {rowMessage?.id === s.sublot_id && (
                   <span className="inline-error">{rowMessage.text}</span>
@@ -239,14 +273,14 @@ export default function MySublots() {
   return (
     <Layout>
       <div className="page">
-        <h1>My sub-lots</h1>
-        <p className="muted">Sub-lots assigned to you. Other workshops are never shown.</p>
+        <h1>{t("sublots.title")}</h1>
+        <p className="muted">{t("sublots.subtitle")}</p>
 
         {error && (
           <div className="banner banner-error">
             <span>{error}</span>
             <button className="btn-retry" onClick={refresh}>
-              Retry
+              {t("common.retry")}
             </button>
           </div>
         )}
@@ -260,26 +294,31 @@ export default function MySublots() {
           <div className="card home-trust-row">
             <div className="summary-inline">
               {trust && (
-                <span className={`status-pill status-${GRADE_TONE[trust.grade] ?? "neutral"}`}>
-                  Grade {trust.grade} · {(trust.score * 100).toFixed(0)}% trust score
+                <span className="summary-inline-item">
+                  <span className={`status-pill status-${GRADE_TONE[trust.grade] ?? "neutral"}`}>
+                    {t("sublots.trustScoreLabel", {
+                      grade: trust.grade,
+                      pct: (trust.score * 100).toFixed(0),
+                    })}
+                  </span>
+                  <InfoTip text={t("sublots.trustTooltip")} />
                 </span>
               )}
               {capacityWarnings.length > 0 && (
                 <span className="capacity-tag tone-warning">
-                  {capacityWarnings.length} product{capacityWarnings.length > 1 ? "s" : ""} running low on
-                  capacity
+                  {t("sublots.lowCapacityWarning", { count: capacityWarnings.length })}
                 </span>
               )}
             </div>
             <div className="summary-inline">
               {capacityWarnings.length > 0 && (
                 <button className="btn btn-ghost btn-sm" onClick={() => navigate("/my-workshop/capacity")}>
-                  View capacity
+                  {t("sublots.viewCapacity")}
                 </button>
               )}
               {trust && (
                 <button className="btn btn-ghost btn-sm" onClick={() => navigate("/my-workshop/trust")}>
-                  View trust score
+                  {t("sublots.viewTrustScore")}
                 </button>
               )}
             </div>
@@ -298,14 +337,14 @@ export default function MySublots() {
             <div className="empty-icon">
               <PackageIcon />
             </div>
-            <p>No sub-lots assigned yet.</p>
+            <p>{t("sublots.noneYet")}</p>
           </div>
         )}
 
         {sublots !== null && actionable.length > 0 && (
           <div className={`wp-section ${urgentCount > 0 ? "is-urgent" : ""}`}>
             <div className="wp-section-head">
-              <h2 className="wp-section-title">Needs your action</h2>
+              <h2 className="wp-section-title">{t("sublots.needsAction")}</h2>
               <span className="wp-section-count">{actionable.length}</span>
             </div>
             {actionable.map((s) => (
@@ -317,7 +356,7 @@ export default function MySublots() {
         {sublots !== null && history.length > 0 && (
           <div className="wp-section">
             <div className="wp-section-head">
-              <h2 className="wp-section-title">Completed &amp; in review</h2>
+              <h2 className="wp-section-title">{t("sublots.completed")}</h2>
               <span className="wp-section-count">{history.length}</span>
             </div>
             {history.map((s) => (

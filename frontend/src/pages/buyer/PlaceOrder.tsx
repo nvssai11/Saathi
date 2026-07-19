@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useAuth } from "../../context/AuthContext";
 import { buyerApi } from "../../api/client";
 import Layout from "../../components/Layout";
@@ -16,7 +17,25 @@ import { HandshakeIcon, LayersIcon, SearchIcon, ShieldCheckIcon } from "../../co
 
 type SortId = (typeof SORT_OPTIONS)[number]["id"];
 
+const CATEGORY_KEY: Record<string, string> = {
+  Bags: "categoryBags",
+  Apparel: "categoryApparel",
+  "Home Décor": "categoryHomeDecor",
+};
+const PRICE_BUCKET_KEY: Record<string, string> = {
+  under50: "priceUnder50",
+  "50to100": "price50to100",
+  over100: "priceOver100",
+};
+const SORT_OPTION_KEY: Record<SortId, string> = {
+  relevance: "sortRelevance",
+  "price-asc": "sortPriceAsc",
+  "price-desc": "sortPriceDesc",
+  "discount-desc": "sortDiscountDesc",
+};
+
 export default function PlaceOrder() {
+  const { t } = useTranslation();
   const { token } = useAuth();
   const navigate = useNavigate();
   const [selected, setSelected] = useState<CatalogItem | null>(null);
@@ -83,8 +102,8 @@ export default function PlaceOrder() {
     <div className="search-bar">
       <SearchIcon />
       <input
-        aria-label="Search products"
-        placeholder="Search bags, apparel, home décor…"
+        aria-label={t("shop.searchLabel")}
+        placeholder={t("shop.searchPlaceholder")}
         value={query}
         onChange={(e) => setQuery(e.target.value)}
       />
@@ -96,30 +115,27 @@ export default function PlaceOrder() {
       <div className="page page-wide">
         <div className="promo-banner">
           <div className="promo-banner-copy">
-            <h1>One supplier. A whole consortium behind it.</h1>
-            <p>
-              Every listing here is bulk capacity pooled across trust-scored SFURTI workshops — you deal
-              with Saathi, we deal with coordination.
-            </p>
+            <h1>{t("shop.heroTitle")}</h1>
+            <p>{t("shop.heroSubtitle")}</p>
           </div>
           <div className="promo-stats">
             <div className="promo-stat">
               <span className="promo-stat-icon">
                 <ShieldCheckIcon />
               </span>
-              Trust-scored workshops
+              {t("shop.statTrust")}
             </div>
             <div className="promo-stat">
               <span className="promo-stat-icon">
                 <LayersIcon />
               </span>
-              MOQ bulk pricing
+              {t("shop.statMoq")}
             </div>
             <div className="promo-stat">
               <span className="promo-stat-icon">
                 <HandshakeIcon />
               </span>
-              Single accountable supplier
+              {t("shop.statSupplier")}
             </div>
           </div>
         </div>
@@ -127,16 +143,16 @@ export default function PlaceOrder() {
         <div className="shop-layout">
           <aside className="filter-panel">
             <div className="filter-panel-header">
-              <h2 className="filter-title">Filters</h2>
+              <h2 className="filter-title">{t("shop.filters")}</h2>
               {filtersActive && (
                 <button type="button" className="filter-clear" onClick={clearFilters}>
-                  Clear all
+                  {t("shop.clearAll")}
                 </button>
               )}
             </div>
             <div className="filter-sections">
               <div className="filter-section">
-                <h3 className="filter-title">Category</h3>
+                <h3 className="filter-title">{t("shop.category")}</h3>
                 {CATEGORIES.map((c) => (
                   <label className="filter-check-row" key={c}>
                     <input
@@ -144,12 +160,12 @@ export default function PlaceOrder() {
                       checked={categories.has(c)}
                       onChange={() => toggleCategory(c)}
                     />
-                    {c}
+                    {t(`shop.${CATEGORY_KEY[c] ?? c}`, c)}
                   </label>
                 ))}
               </div>
               <div className="filter-section">
-                <h3 className="filter-title">Price</h3>
+                <h3 className="filter-title">{t("shop.price")}</h3>
                 {PRICE_BUCKETS.map((b) => (
                   <label className="filter-check-row" key={b.id}>
                     <input
@@ -157,7 +173,7 @@ export default function PlaceOrder() {
                       checked={priceBuckets.has(b.id)}
                       onChange={() => togglePriceBucket(b.id)}
                     />
-                    {b.label}
+                    {t(`shop.${PRICE_BUCKET_KEY[b.id] ?? b.id}`, b.label)}
                   </label>
                 ))}
               </div>
@@ -166,16 +182,16 @@ export default function PlaceOrder() {
 
           <div className="shop-results">
             <div className="results-toolbar">
-              <span className="results-count">{items.length} products</span>
+              <span className="results-count">{t("shop.resultsCount", { count: items.length })}</span>
               <select
                 className="sort-select"
-                aria-label="Sort products"
+                aria-label={t("shop.sortLabel")}
                 value={sort}
                 onChange={(e) => setSort(e.target.value as SortId)}
               >
                 {SORT_OPTIONS.map((opt) => (
                   <option key={opt.id} value={opt.id}>
-                    {opt.label}
+                    {t(`shop.${SORT_OPTION_KEY[opt.id]}`, opt.label)}
                   </option>
                 ))}
               </select>
@@ -183,10 +199,10 @@ export default function PlaceOrder() {
 
             {items.length === 0 ? (
               <div className="card empty-state">
-                <p>No products match your search{filtersActive ? " and filters" : ""}.</p>
+                <p>{filtersActive ? t("shop.noProductsWithFilters") : t("shop.noProducts")}</p>
                 {filtersActive && (
                   <button type="button" className="btn btn-secondary" onClick={clearFilters}>
-                    Clear filters
+                    {t("shop.clearFiltersBtn")}
                   </button>
                 )}
               </div>
@@ -202,19 +218,21 @@ export default function PlaceOrder() {
                     >
                       <div className="product-swatch" style={{ background: item.swatch }}>
                         <span>{item.emoji}</span>
-                        <span className="discount-badge">{pct}% OFF</span>
+                        <span className="discount-badge">{t("shop.percentOffBadge", { pct })}</span>
                       </div>
                       <div className="product-info">
-                        <span className="product-category">{item.category}</span>
+                        <span className="product-category">
+                          {t(`shop.${CATEGORY_KEY[item.category] ?? item.category}`, item.category)}
+                        </span>
                         <span className="product-name">{item.name}</span>
                         <div className="product-price-row">
                           <span className="product-price">₹{item.price}</span>
                           <span className="product-mrp">₹{item.factoryPrice}</span>
-                          <span className="product-off">{pct}% off</span>
+                          <span className="product-off">{t("shop.percentOff", { pct })}</span>
                         </div>
                         <div className="product-bottom-row">
-                          <span className="verified-badge">✓ Verified</span>
-                          <span className="product-moq">MOQ {item.moq}</span>
+                          <span className="verified-badge">✓ {t("shop.verified")}</span>
+                          <span className="product-moq">{t("shop.moq", { moq: item.moq })}</span>
                         </div>
                       </div>
                     </button>

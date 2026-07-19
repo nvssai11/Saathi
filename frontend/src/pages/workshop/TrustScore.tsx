@@ -1,21 +1,24 @@
+import { useTranslation } from "react-i18next";
 import { useWorkshopData } from "../../context/WorkshopDataContext";
 import Layout from "../../components/Layout";
 import ScoreRing from "../../components/ScoreRing";
 import { SkeletonCard } from "../../components/Skeleton";
+import { localizedExplanation } from "../../utils/format";
 
 export default function TrustScore() {
+  const { t, i18n } = useTranslation();
   const { trust, trustError: error, refresh } = useWorkshopData();
 
   return (
     <Layout>
       <div className="page page-narrow">
-        <h1>My trust score</h1>
+        <h1>{t("trust.title")}</h1>
 
         {error && (
           <div className="banner banner-error">
             <span>{error}</span>
             <button className="btn-retry" onClick={refresh}>
-              Retry
+              {t("common.retry")}
             </button>
           </div>
         )}
@@ -28,51 +31,67 @@ export default function TrustScore() {
             </div>
 
             <div className="card">
-              <h2>Why this score</h2>
+              <h2>{t("trust.whyThisScore")}</h2>
               <ul className="explanation-list">
-                {trust.explanation.map((line, i) => (
-                  <li key={i}>{line}</li>
-                ))}
+                {trust.window_count === 0 ? (
+                  <li>{t("trust.explanationColdStart", { score: trust.score.toFixed(3) })}</li>
+                ) : (
+                  <>
+                    <li>
+                      {t("trust.explanationScore", {
+                        score: trust.score.toFixed(3),
+                        grade: trust.grade,
+                        count: trust.window_count,
+                      })}
+                    </li>
+                    <li>
+                      {t("trust.explanationOnTime", { pct: (trust.on_time_rate * 100).toFixed(1) })}
+                    </li>
+                    <li>
+                      {t("trust.explanationDefect", { pct: (trust.defect_rate * 100).toFixed(1) })}
+                    </li>
+                  </>
+                )}
               </ul>
             </div>
 
-            <div className="card table-card">
-              <h2>Last 5 events</h2>
+            <div className="wp-section">
+              <div className="wp-section-head">
+                <h2 className="wp-section-title">{t("trust.lastEvents")}</h2>
+              </div>
               {trust.history.length === 0 ? (
-                <p className="muted">No delivery history yet.</p>
-              ) : (
-                <div className="table-scroll">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Sub-lot</th>
-                        <th>Date</th>
-                        <th>On time</th>
-                        <th>Defect</th>
-                        <th>Fault</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {trust.history.map((h, i) => (
-                        <tr key={i}>
-                          <td>#{h.sublot_id}</td>
-                          <td>{new Date(h.date).toLocaleDateString()}</td>
-                          <td className={h.on_time ? "tone-good" : "tone-critical"}>
-                            {h.on_time ? "Yes" : "No"}
-                          </td>
-                          <td className={h.defect_found ? "tone-critical" : "tone-good"}>
-                            {h.defect_found ? "Yes" : "No"}
-                          </td>
-                          <td className={h.fault_party === "none" ? "tone-neutral" : ""}>
-                            {h.fault_party === "none"
-                              ? "—"
-                              : h.fault_party.charAt(0).toUpperCase() + h.fault_party.slice(1)}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <div className="card">
+                  <p className="muted">{t("trust.noHistory")}</p>
                 </div>
+              ) : (
+                trust.history.map((h, i) => (
+                  <div className="trust-event-card" key={i}>
+                    <div className="trust-event-head">
+                      <span className="trust-event-sublot">{t("trust.eventSublot", { sublotId: h.sublot_id })}</span>
+                      <span className="trust-event-date">{new Date(h.date).toLocaleDateString()}</span>
+                    </div>
+                    <div className="trust-event-tags">
+                      <span className={`status-pill status-${h.on_time ? "good" : "critical"}`}>
+                        {h.on_time ? t("trust.eventOnTime") : t("trust.eventLate")}
+                      </span>
+                      <span
+                        className={`status-pill status-${
+                          !h.defect_found ? "good" : h.fault_party === "workshop" ? "critical" : "neutral"
+                        }`}
+                      >
+                        {!h.defect_found
+                          ? t("trust.eventNoDefect")
+                          : h.fault_party === "workshop"
+                          ? t("trust.eventDefectYourFault")
+                          : t("trust.eventDefectNotYourFault")}
+                      </span>
+                    </div>
+                    <p className="trust-event-explanation">
+                      {localizedExplanation(h.explanation, h.explanations, i18n.language) ??
+                        t("trust.noExplanation")}
+                    </p>
+                  </div>
+                ))
               )}
             </div>
           </>

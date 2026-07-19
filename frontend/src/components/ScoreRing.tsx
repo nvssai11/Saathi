@@ -1,8 +1,10 @@
-const GRADE_STYLE: Record<string, { color: string; bg: string; label: string }> = {
-  A: { color: "var(--good)", bg: "var(--good-bg)", label: "Excellent" },
-  B: { color: "var(--good)", bg: "var(--good-bg)", label: "Good standing" },
-  C: { color: "var(--warning)", bg: "var(--warning-bg)", label: "Needs attention" },
-  D: { color: "var(--critical)", bg: "var(--critical-bg)", label: "At risk" },
+import { useTranslation } from "react-i18next";
+
+const GRADE_STYLE: Record<string, { color: string; bg: string }> = {
+  A: { color: "var(--good)", bg: "var(--good-bg)" },
+  B: { color: "var(--good)", bg: "var(--good-bg)" },
+  C: { color: "var(--warning)", bg: "var(--warning-bg)" },
+  D: { color: "var(--critical)", bg: "var(--critical-bg)" },
 };
 
 const SIZE = 160;
@@ -11,6 +13,7 @@ const RADIUS = (SIZE - STROKE) / 2;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 
 export default function ScoreRing({ score, grade }: { score: number; grade: string }) {
+  const { t } = useTranslation();
   const style = GRADE_STYLE[grade] ?? GRADE_STYLE.D;
   const pct = Math.max(0, Math.min(1, score));
   const offset = CIRCUMFERENCE * (1 - pct);
@@ -43,7 +46,7 @@ export default function ScoreRing({ score, grade }: { score: number; grade: stri
       <div className="score-ring-value">
         <span className="score-ring-pct">{(pct * 100).toFixed(0)}%</span>
         <span className="score-ring-grade" style={{ color: style.color, background: style.bg }}>
-          Grade {grade} · {style.label}
+          {t("trust.gradeLabel", { grade, label: t(`trust.grade.${grade}`, t("trust.grade.D")) })}
         </span>
       </div>
     </div>

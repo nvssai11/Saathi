@@ -1,15 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useAuth } from "../../context/AuthContext";
 import { ApiError, OrderListItem, buyerApi } from "../../api/client";
 import Layout from "../../components/Layout";
 import { PackageIcon } from "../../components/icons";
 import { SkeletonTable } from "../../components/Skeleton";
 import { formatProductType } from "../../data/catalog";
+import { translateBuyerStatus } from "../../utils/format";
 
 const TERMINAL_STATUSES = new Set(["Delivered", "Failed", "Cancelled"]);
 
 export default function OrderList() {
+  const { t } = useTranslation();
   const { token } = useAuth();
   const [orders, setOrders] = useState<OrderListItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -21,9 +24,9 @@ export default function OrderList() {
       setOrders(res.orders);
       setError(null);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not load orders.");
+      setError(err instanceof ApiError ? err.message : t("orderList.loadError"));
     }
-  }, [token]);
+  }, [token, t]);
 
   useEffect(() => {
     load();
@@ -41,9 +44,9 @@ export default function OrderList() {
     <Layout>
       <div className="page">
         <div className="page-header">
-          <h1>Your orders</h1>
+          <h1>{t("orderList.title")}</h1>
           <Link to="/buyer/new-order" className="btn btn-accent">
-            + Place order
+            {t("orderList.placeOrder")}
           </Link>
         </div>
 
@@ -51,7 +54,7 @@ export default function OrderList() {
           <div className="banner banner-error">
             <span>{error}</span>
             <button className="btn-retry" onClick={load}>
-              Retry
+              {t("common.retry")}
             </button>
           </div>
         )}
@@ -63,9 +66,9 @@ export default function OrderList() {
             <div className="empty-icon">
               <PackageIcon />
             </div>
-            <p>No orders yet.</p>
+            <p>{t("orderList.noOrders")}</p>
             <Link to="/buyer/new-order" className="btn btn-primary">
-              Place your first order
+              {t("orderList.placeFirstOrder")}
             </Link>
           </div>
         )}
@@ -76,11 +79,11 @@ export default function OrderList() {
               <table>
                 <thead>
                   <tr>
-                    <th>Order</th>
-                    <th>Product</th>
-                    <th>Qty</th>
-                    <th>Deadline</th>
-                    <th>Status</th>
+                    <th>{t("orderList.colOrder")}</th>
+                    <th>{t("orderList.colProduct")}</th>
+                    <th>{t("orderList.colQty")}</th>
+                    <th>{t("orderList.colDeadline")}</th>
+                    <th>{t("orderList.colStatus")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -94,7 +97,7 @@ export default function OrderList() {
                       <td>{o.deadline}</td>
                       <td>
                         <span className={`status-pill status-${o.status.toLowerCase().replace(/\s+/g, "-")}`}>
-                          {o.status}
+                          {translateBuyerStatus(o.status, t)}
                         </span>
                       </td>
                     </tr>

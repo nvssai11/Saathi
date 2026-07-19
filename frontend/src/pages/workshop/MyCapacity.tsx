@@ -1,8 +1,10 @@
 import { FormEvent, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useAuth } from "../../context/AuthContext";
 import { ApiError, WorkshopCapacityListItem, workshopApi } from "../../api/client";
 import { useWorkshopData } from "../../context/WorkshopDataContext";
 import Layout from "../../components/Layout";
+import InfoTip from "../../components/InfoTip";
 import { PackageIcon } from "../../components/icons";
 import { SkeletonCard } from "../../components/Skeleton";
 import { catalogItemFor, formatProductType } from "../../data/catalog";
@@ -18,6 +20,7 @@ const EMPTY_DRAFT: CapacityDraft = { available_qty: "", cost_per_unit: "", lead_
 const URGENCY_RANK = { critical: 0, warning: 1, normal: 2 } as const;
 
 export default function MyCapacity() {
+  const { t } = useTranslation();
   const { token } = useAuth();
   const { capacity: items, capacityError: error, refresh } = useWorkshopData();
 
@@ -56,7 +59,7 @@ export default function MyCapacity() {
     } catch (err) {
       setRowMessage({
         product: productType,
-        text: err instanceof ApiError ? err.message : "Could not update capacity.",
+        text: err instanceof ApiError ? err.message : t("capacity.updateError"),
       });
     } finally {
       setBusy(false);
@@ -80,7 +83,7 @@ export default function MyCapacity() {
       setAddDraft(EMPTY_DRAFT);
       refresh();
     } catch (err) {
-      setAddError(err instanceof ApiError ? err.message : "Could not add product.");
+      setAddError(err instanceof ApiError ? err.message : t("capacity.addError"));
     } finally {
       setBusy(false);
     }
@@ -100,17 +103,14 @@ export default function MyCapacity() {
   return (
     <Layout>
       <div className="page">
-        <h1>My capacity</h1>
-        <p className="muted">
-          Available Inventory is what you can still commit — In Transit and Serving Capacity update
-          automatically as orders move through delivery.
-        </p>
+        <h1>{t("capacity.title")}</h1>
+        <p className="muted">{t("capacity.subtitle")}</p>
 
         {error && (
           <div className="banner banner-error">
             <span>{error}</span>
             <button className="btn-retry" onClick={refresh}>
-              Retry
+              {t("common.retry")}
             </button>
           </div>
         )}
@@ -126,7 +126,7 @@ export default function MyCapacity() {
             <div className="empty-icon">
               <PackageIcon />
             </div>
-            <p>No product capacity set up yet.</p>
+            <p>{t("capacity.noneYet")}</p>
           </div>
         )}
 
@@ -152,17 +152,23 @@ export default function MyCapacity() {
                     <div>
                       <div className="capacity-name">{formatProductType(item.product_type)}</div>
                       <div className="capacity-sub">
-                        ₹{item.cost_per_unit}/unit · {item.lead_time_days}d lead time
+                        {t("capacity.costLeadTime", {
+                          cost: item.cost_per_unit,
+                          days: item.lead_time_days,
+                        })}
                       </div>
                     </div>
                   </div>
                   <div className="capacity-stats">
                     <div className="capacity-stat">
-                      <div className="capacity-stat-label">Serving capacity</div>
+                      <div className="capacity-stat-label">
+                        {t("capacity.servingCapacity")}
+                        <InfoTip text={t("capacity.servingCapacityTooltip")} />
+                      </div>
                       <div className="capacity-stat-value">{item.serving_capacity}</div>
                       {urgency !== "normal" && (
                         <div className={`capacity-tag ${urgency === "critical" ? "tone-critical" : "tone-warning"}`}>
-                          {urgency === "critical" ? "Fully committed" : "Running low"}
+                          {urgency === "critical" ? t("capacity.fullyCommitted") : t("capacity.runningLow")}
                         </div>
                       )}
                     </div>
@@ -176,27 +182,25 @@ export default function MyCapacity() {
                 <div className="capacity-legend">
                   <span>
                     <span className="capacity-legend-dot" style={{ background: "var(--brand-500)" }} />
-                    Serving capacity {item.serving_capacity}
+                    {t("capacity.servingCapacityLegend", { qty: item.serving_capacity })}
                   </span>
                   <span>
                     <span className="capacity-legend-dot" style={{ background: "var(--accent-400)" }} />
-                    In transit {item.in_transit_qty}
+                    {t("capacity.inTransitLegend", { qty: item.in_transit_qty })}
                   </span>
-                  <span>Available inventory {item.available_qty}</span>
+                  <span>{t("capacity.availableInventoryLegend", { qty: item.available_qty })}</span>
                 </div>
-                <p className="capacity-plain-help">
-                  In transit = already promised to other orders. Available inventory = your total stock.
-                </p>
+                <p className="capacity-plain-help">{t("capacity.plainHelp")}</p>
 
                 <div className="capacity-card-actions">
                   {!isEditing ? (
                     <button className="btn btn-secondary btn-sm" onClick={() => openEdit(item)}>
-                      Edit
+                      {t("capacity.edit")}
                     </button>
                   ) : (
                     <div className="inline-form">
                       <label>
-                        Available Inventory
+                        {t("capacity.availableInventoryLabel")}
                         <input
                           type="number"
                           min={item.in_transit_qty}
@@ -207,7 +211,7 @@ export default function MyCapacity() {
                         />
                       </label>
                       <label>
-                        Cost/unit
+                        {t("capacity.costPerUnit")}
                         <input
                           type="number"
                           min={0}
@@ -219,7 +223,7 @@ export default function MyCapacity() {
                         />
                       </label>
                       <label>
-                        Lead time (days)
+                        {t("capacity.leadTimeDays")}
                         <input
                           type="number"
                           min={1}
@@ -234,10 +238,10 @@ export default function MyCapacity() {
                         disabled={busy}
                         onClick={() => submitEdit(item.product_type)}
                       >
-                        Save
+                        {t("common.save")}
                       </button>
                       <button className="btn btn-ghost btn-sm" onClick={() => setEditing(null)}>
-                        Cancel
+                        {t("common.cancel")}
                       </button>
                       {rowMessage?.product === item.product_type && (
                         <span className="inline-error">{rowMessage.text}</span>
@@ -252,12 +256,12 @@ export default function MyCapacity() {
         <div className="card">
           {!addOpen ? (
             <button className="btn btn-secondary" onClick={() => setAddOpen(true)}>
-              + Add product
+              {t("capacity.addProduct")}
             </button>
           ) : (
             <form className="inline-form" onSubmit={submitAdd}>
               <label>
-                Product type
+                {t("capacity.productType")}
                 <input
                   type="text"
                   required
@@ -266,7 +270,7 @@ export default function MyCapacity() {
                 />
               </label>
               <label>
-                Available Inventory
+                {t("capacity.availableInventoryLabel")}
                 <input
                   type="number"
                   min={0}
@@ -276,7 +280,7 @@ export default function MyCapacity() {
                 />
               </label>
               <label>
-                Cost/unit
+                {t("capacity.costPerUnit")}
                 <input
                   type="number"
                   min={0}
@@ -287,7 +291,7 @@ export default function MyCapacity() {
                 />
               </label>
               <label>
-                Lead time (days)
+                {t("capacity.leadTimeDays")}
                 <input
                   type="number"
                   min={1}
@@ -297,10 +301,10 @@ export default function MyCapacity() {
                 />
               </label>
               <button className="btn btn-primary btn-sm" type="submit" disabled={busy}>
-                Save
+                {t("common.save")}
               </button>
               <button className="btn btn-ghost btn-sm" type="button" onClick={() => setAddOpen(false)}>
-                Cancel
+                {t("common.cancel")}
               </button>
               {addError && <span className="inline-error">{addError}</span>}
             </form>

@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useAuth } from "../../context/AuthContext";
 import { ApiError, SettlementSummaryResponse, buyerApi } from "../../api/client";
 import Layout from "../../components/Layout";
 import { SkeletonCard } from "../../components/Skeleton";
 
 export default function Invoice() {
+  const { t } = useTranslation();
   const { token } = useAuth();
   const { orderId } = useParams<{ orderId: string }>();
   const id = Number(orderId);
@@ -19,9 +21,9 @@ export default function Invoice() {
       setInvoice(await buyerApi.getInvoice(token, id));
       setError(null);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not load invoice.");
+      setError(err instanceof ApiError ? err.message : t("invoice.loadError"));
     }
-  }, [token, id]);
+  }, [token, id, t]);
 
   useEffect(() => {
     load();
@@ -31,15 +33,15 @@ export default function Invoice() {
     <Layout>
       <div className="page page-narrow">
         <Link to={`/buyer/orders/${id}`} className="back-link">
-          &larr; Order #{id}
+          {t("invoice.backToOrder", { id })}
         </Link>
-        <h1>Invoice</h1>
+        <h1>{t("invoice.title")}</h1>
 
         {error && (
           <div className="banner banner-error">
             <span>{error}</span>
             <button className="btn-retry" onClick={load}>
-              Retry
+              {t("common.retry")}
             </button>
           </div>
         )}
@@ -49,19 +51,19 @@ export default function Invoice() {
         {invoice && (
           <div className="card invoice-card">
             <div className="invoice-row">
-              <span>Order</span>
+              <span>{t("invoice.order")}</span>
               <span>#{invoice.order_id}</span>
             </div>
             <div className="invoice-row">
-              <span>Goods delivered</span>
+              <span>{t("invoice.goodsDelivered")}</span>
               <span>₹{invoice.buyer_base}</span>
             </div>
             <div className="invoice-row">
-              <span>Platform fee</span>
+              <span>{t("invoice.platformFee")}</span>
               <span>₹{invoice.platform_fee}</span>
             </div>
             <div className="invoice-row invoice-total">
-              <span>Total</span>
+              <span>{t("invoice.total")}</span>
               <span>₹{invoice.buyer_total}</span>
             </div>
           </div>

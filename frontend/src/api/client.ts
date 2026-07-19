@@ -139,6 +139,7 @@ export interface OrderStatusResponse {
   sublots_delivered: number;
   sublots_verified: number;
   sublots_failed: number;
+  has_defect_photo: boolean;
 }
 
 export interface QuoteLineItem {
@@ -205,6 +206,8 @@ export interface SubLotSummary {
   qty_assigned: number;
   delivered_qty: number | null;
   status: string;
+  explanation: string | null;
+  explanations: Record<string, string>;
 }
 
 export interface TrustEventSummary {
@@ -213,6 +216,8 @@ export interface TrustEventSummary {
   defect_found: boolean;
   fault_party: string;
   date: string;
+  explanation: string | null;
+  explanations: Record<string, string>;
 }
 
 export interface TrustScoreResponse {
@@ -220,8 +225,34 @@ export interface TrustScoreResponse {
   score: number;
   grade: string;
   explanation: string[];
+  on_time_rate: number;
+  defect_rate: number;
+  window_count: number;
   history: TrustEventSummary[];
 }
+
+export interface OtpRequestResponse {
+  phone_number: string;
+  expires_in_seconds: number;
+  demo_code: string | null;
+}
+
+export interface OtpVerifyResponse {
+  token: string;
+  workshop_id: number;
+  workshop_name: string;
+}
+
+export const authApi = {
+  requestOtp: (phoneNumber: string) =>
+    request<OtpRequestResponse>("/auth/otp/request", jsonBody({ phone_number: phoneNumber })),
+
+  verifyOtp: (phoneNumber: string, code: string) =>
+    request<OtpVerifyResponse>(
+      "/auth/otp/verify",
+      jsonBody({ phone_number: phoneNumber, code })
+    ),
+};
 
 export const buyerApi = {
   placeOrder: (token: string, body: PlaceOrderRequest) =>
@@ -242,6 +273,18 @@ export const buyerApi = {
   getInvoice: (token: string, orderId: number) =>
     request<SettlementSummaryResponse>(`/orders/${orderId}/invoice`, { token }),
 
+  getDefectPhotoUrl: async (token: string, orderId: number): Promise<string> => {
+    const res = await fetch(`${API_BASE_URL}/orders/${orderId}/defect-photo`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      const { message } = await parseErrorBody(res);
+      throw new ApiError(res.status, message);
+    }
+    const blob = await res.blob();
+    return URL.createObjectURL(blob);
+  },
+
   cancelOrder: (token: string, orderId: number) =>
     request<void>(`/orders/${orderId}`, { method: "DELETE", token }),
 
@@ -257,12 +300,14 @@ export const buyerApi = {
     form.append("photo", photo);
     form.append("defect_qty", String(defectQty));
     form.append("description", description);
-    return uploadWithProgress<{ order_id: number; defect_qty: number; verification_status: string }>(
-      `/orders/${orderId}/flag-defect`,
-      form,
-      token,
-      onProgress
-    );
+    return uploadWithProgress<{
+      order_id: number;
+      defect_qty: number;
+      verification_status: string;
+      explanation: string | null;
+      explanations: Record<string, string>;
+      fault_party: string | null;
+    }>(`/orders/${orderId}/flag-defect`, form, token, onProgress);
   },
 };
 
@@ -316,6 +361,25 @@ export interface ReviewItem {
   fault_party: string | null;
   confidence: number | null;
   explanation: string | null;
+  explanations: Record<string, string>;
+}
+
+export interface AllocationItem {
+  sublot_id: number;
+  workshop_id: number;
+  workshop_name: string;
+  is_factory: boolean;
+  qty_assigned: number;
+  delivered_qty: number | null;
+  cost_per_unit: string;
+  status: string;
+}
+
+export interface OrderAllocationResponse {
+  order_id: number;
+  total_qty: number;
+  workshop_count: number;
+  sublots: AllocationItem[];
 }
 
 export const adminApi = {
@@ -326,4 +390,7 @@ export const adminApi = {
       `/admin/sublots/${sublotId}/retry-verification`,
       { method: "POST", token }
     ),
+
+  getOrderAllocation: (token: string, orderId: number) =>
+    request<OrderAllocationResponse>(`/admin/orders/${orderId}/allocation`, { token }),
 };
