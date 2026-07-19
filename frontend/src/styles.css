@@ -420,6 +420,13 @@ a {
   .auth-card {
     padding: 1.6rem 1.35rem;
   }
+  .quick-login-row {
+    gap: 0.5rem;
+  }
+  .quick-login-row .btn-sm {
+    padding: 0.45rem 0.75rem;
+    font-size: 0.78rem;
+  }
 }
 
 .auth-card h1 {

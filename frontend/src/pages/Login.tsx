@@ -83,7 +83,7 @@ export default function Login() {
       setWorkshopAuthMode("token");
     }
     setToken(demoToken);
-    setShowToken(true);
+    setShowToken(false);
   }
 
   function goToDestination(nextRole: Role) {
@@ -396,7 +396,7 @@ export default function Login() {
 
         <div className="field">
           <label>{t("login.demoQuickLogin")}</label>
-          <div className="action-row">
+          <div className="action-row quick-login-row">
             {role === "buyer" && (
               <button
                 type="button"
