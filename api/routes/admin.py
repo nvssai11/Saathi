@@ -4,11 +4,12 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from api.dependencies import get_coordinator, order_repo, require_admin, sublot_repo
+from api.dependencies import get_coordinator, notification_repo, order_repo, require_admin, sublot_repo
 from api.models import AllocationItem, OrderAllocationResponse, ReviewItem, RetryVerificationRequest
 from config import settings
 from core.domain import VerificationOutput
 from core.exceptions import InvalidStateTransitionError
+from db.repositories.notification_repository import NotificationRepository
 from db.repositories.order_repository import OrderRepository
 from db.repositories.sublot_repository import SublotRepository
 from events.producer import publish_order_placed
@@ -57,6 +58,34 @@ async def reconcile_stuck_orders(
         "republished_count": len(stuck),
         "order_ids": [row["order_id"] for row in stuck],
     }
+
+
+@router.post("/orders/{order_id}/republish-notifications", status_code=status.HTTP_200_OK)
+async def republish_notifications(
+    order_id: int,
+    _: None = Depends(require_admin),
+    orders: OrderRepository = Depends(order_repo),
+    sublots: SublotRepository = Depends(sublot_repo),
+    notifications: NotificationRepository = Depends(notification_repo),
+):
+    order_row = await orders.get(order_id)
+    if order_row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "ORDER_NOT_FOUND", "message": f"Order {order_id} does not exist"},
+        )
+
+    rows = await sublots.list_for_order_admin(order_id)
+    for r in rows:
+        await notifications.create(
+            workshop_id=r["workshop_id"],
+            order_id=order_id,
+            sublot_id=r["sublot_id"],
+            product_type=order_row["product_type"],
+            qty_assigned=r["qty_assigned"],
+        )
+
+    return {"order_id": order_id, "notifications_republished": len(rows)}
 
 
 @router.get("/orders/{order_id}/allocation", response_model=OrderAllocationResponse)

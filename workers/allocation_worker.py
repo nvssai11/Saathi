@@ -59,10 +59,20 @@ class AllocationWorker:
             return
 
         for assignment in assignments:
-            await publish_sublot_assigned(
-                sublot_id=assignment.sublot_id,
-                order_id=assignment.order_id,
-                workshop_id=assignment.workshop_id,
-                product_type=assignment.product_type,
-                qty_assigned=assignment.qty_assigned,
-            )
+            try:
+                await publish_sublot_assigned(
+                    sublot_id=assignment.sublot_id,
+                    order_id=assignment.order_id,
+                    workshop_id=assignment.workshop_id,
+                    product_type=assignment.product_type,
+                    qty_assigned=assignment.qty_assigned,
+                )
+            except Exception:
+                logger.error(
+                    "AllocationWorker: failed to publish sublot.assigned for "
+                    "sublot_id=%s order_id=%s — the sub-lot is allocated but its "
+                    "notification did not fire; recover with "
+                    "POST /admin/orders/%s/republish-notifications",
+                    assignment.sublot_id, assignment.order_id, assignment.order_id,
+                    exc_info=True,
+                )
