@@ -138,6 +138,8 @@ a {
   gap: 0.75rem;
   margin-left: auto;
   white-space: nowrap;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .lang-toggle {
@@ -223,17 +225,41 @@ a {
   .app-header {
     flex-wrap: wrap;
     row-gap: 0.6rem;
+    padding: 0.75rem 1rem;
   }
   .help-link span {
     display: none;
+  }
+  .role-badge span {
+    display: none;
+  }
+  .sign-out-btn {
+    padding: 0.5rem 0.8rem;
+    font-size: 0.82rem;
   }
   .header-search {
     order: 3;
     flex-basis: 100%;
     max-width: none;
   }
+  /* Sticky subnav relies on a fixed pixel offset matching the header's
+     height, which becomes unpredictable once the header itself wraps
+     across a variable number of lines on narrow screens — simplest robust
+     fix is to stop pinning it here rather than guess a height. */
   .app-subnav {
-    top: 106px;
+    position: static;
+  }
+  .app-main {
+    padding: 1.5rem 1rem 3rem;
+  }
+  .card {
+    padding: 1.1rem;
+  }
+}
+
+@media (max-width: 400px) {
+  .role-badge {
+    padding: 0.3rem;
   }
 }
 
@@ -348,6 +374,7 @@ a {
   justify-content: space-between;
   margin-bottom: 1.4rem;
   gap: 1rem;
+  flex-wrap: wrap;
 }
 
 .back-link {
@@ -456,10 +483,11 @@ a {
 .field-row {
   display: flex;
   gap: 1rem;
+  flex-wrap: wrap;
 }
 
 .field-row .field {
-  flex: 1;
+  flex: 1 1 160px;
 }
 
 label {
@@ -986,6 +1014,13 @@ tbody tr:hover td {
 .confirm-actions {
   display: flex;
   gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 420px) {
+  .confirm-actions .btn {
+    flex: 1 1 auto;
+  }
 }
 
 .stepper {
@@ -1064,6 +1099,36 @@ tbody tr:hover td {
   max-width: 90px;
 }
 
+@media (max-width: 640px) {
+  /* Seven steps in one fixed-width row is the single worst offender on
+     mobile — labels collide and overlap below ~600px. Rather than hide
+     content, let the strip scroll horizontally with each step pinned to a
+     width that actually fits its label, and land on the current step. */
+  .stepper {
+    overflow-x: auto;
+    padding: 0.15rem 0.1rem 0.6rem;
+    margin: 0.5rem -0.1rem 1.5rem;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+  }
+  .stepper-step {
+    flex: 0 0 68px;
+    min-width: 68px;
+  }
+  .stepper-line {
+    left: -55%;
+  }
+  .stepper-dot {
+    width: 28px;
+    height: 28px;
+    font-size: 0.72rem;
+  }
+  .stepper-label {
+    font-size: 0.66rem;
+    max-width: 66px;
+  }
+}
+
 .stepper-step.done .stepper-label,
 .stepper-step.current .stepper-label {
   color: var(--text);
@@ -1124,9 +1189,10 @@ tbody tr:hover td {
 .quote-summary {
   display: flex;
   justify-content: flex-end;
-  gap: 1.75rem;
+  gap: 1.25rem 1.75rem;
   padding: 0.85rem 1.5rem 0;
   font-size: 0.9rem;
+  flex-wrap: wrap;
 }
 
 .quote-total {

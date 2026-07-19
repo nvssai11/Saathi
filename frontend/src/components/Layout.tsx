@@ -80,8 +80,8 @@ export default function Layout({ children, search }: LayoutProps) {
             <UserIcon />
             {role ? t(`common.role.${role}`) : ""}
           </span>
-          <button className="btn btn-ghost" onClick={logout}>
-            {t("common.signOut")}
+          <button className="btn btn-ghost sign-out-btn" onClick={logout}>
+            <span>{t("common.signOut")}</span>
           </button>
         </div>
       </header>

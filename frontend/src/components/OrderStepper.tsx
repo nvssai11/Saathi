@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { translateBuyerStatus } from "../utils/format";
 
@@ -8,13 +9,22 @@ export default function OrderStepper({ status }: { status: string }) {
   const currentIndex = STEPS.indexOf(
     status === "Delivered — with quality issues" ? "Delivered" : status
   );
+  const currentRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    currentRef.current?.scrollIntoView({ block: "nearest", inline: "center" });
+  }, [currentIndex]);
 
   return (
     <div className="stepper">
       {STEPS.map((label, i) => {
         const state = currentIndex < 0 ? "" : i < currentIndex ? "done" : i === currentIndex ? "current" : "";
         return (
-          <div key={label} className={`stepper-step ${state}`}>
+          <div
+            key={label}
+            ref={state === "current" ? currentRef : undefined}
+            className={`stepper-step ${state}`}
+          >
             <span className="stepper-line" />
             <span className="stepper-dot">{state === "done" ? "✓" : i + 1}</span>
             <span className="stepper-label">{translateBuyerStatus(label, t)}</span>
