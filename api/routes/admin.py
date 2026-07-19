@@ -12,7 +12,6 @@ from core.exceptions import InvalidStateTransitionError
 from db.repositories.notification_repository import NotificationRepository
 from db.repositories.order_repository import OrderRepository
 from db.repositories.sublot_repository import SublotRepository
-from events.producer import publish_order_placed
 from services.coordinator import OrderCoordinator
 
 logger = logging.getLogger(__name__)
@@ -48,15 +47,13 @@ async def enforce_deadline(
 @router.post("/orders/reconcile-stuck", status_code=status.HTTP_200_OK)
 async def reconcile_stuck_orders(
     _: None = Depends(require_admin),
-    orders: OrderRepository = Depends(order_repo),
+    coordinator: OrderCoordinator = Depends(get_coordinator),
 ):
-    stuck = await orders.list_stuck_pending(settings.stuck_order_threshold_seconds)
-    for row in stuck:
-        await publish_order_placed(row["order_id"], str(row["correlation_id"]))
+    order_ids = await coordinator.reconcile_stuck_orders()
 
     return {
-        "republished_count": len(stuck),
-        "order_ids": [row["order_id"] for row in stuck],
+        "republished_count": len(order_ids),
+        "order_ids": order_ids,
     }
 
 

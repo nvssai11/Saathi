@@ -28,6 +28,7 @@ from services.coordinator import build_coordinator
 from workers.allocation_worker import AllocationWorker
 from workers.auto_verify_worker import AutoVerifyWorker
 from workers.notification_worker import NotificationWorker
+from workers.stuck_order_worker import StuckOrderWorker
 from workers.verification_worker import VerificationWorker
 
 logging.basicConfig(
@@ -50,11 +51,13 @@ async def lifespan(app: FastAPI):
     verification_worker = VerificationWorker(coordinator)
     notification_worker = NotificationWorker(coordinator)
     auto_verify_worker = AutoVerifyWorker(coordinator)
+    stuck_order_worker = StuckOrderWorker(coordinator)
     worker_tasks = [
         asyncio.create_task(allocation_worker.run(), name="allocation-worker"),
         asyncio.create_task(verification_worker.run(), name="verification-worker"),
         asyncio.create_task(notification_worker.run(), name="notification-worker"),
         asyncio.create_task(auto_verify_worker.run(), name="auto-verify-worker"),
+        asyncio.create_task(stuck_order_worker.run(), name="stuck-order-worker"),
     ]
     logger.info("Saathi API started")
 

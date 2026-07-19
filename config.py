@@ -72,6 +72,11 @@ class Settings(BaseSettings):
     max_upload_size_bytes: int = 10 * 1024 * 1024
 
     stuck_order_threshold_seconds: int = 60
+    # Was a manual-only admin trigger in v0 (POST /admin/orders/reconcile-stuck) —
+    # StuckOrderWorker below now sweeps on this interval automatically, same
+    # pattern as auto_verify_sweep_interval_seconds. The manual endpoint stays,
+    # now just calling the same OrderCoordinator.reconcile_stuck_orders().
+    stuck_order_sweep_interval_seconds: int = 20
 
     @property
     def workshop_tokens(self) -> dict[str, int]:

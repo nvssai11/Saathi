@@ -31,6 +31,7 @@ from db.repositories.sublot_repository import SublotRepository
 from db.repositories.trust_repository import TrustRepository
 from db.repositories.verification_repository import VerificationRepository
 from db.repositories.workshop_repository import WorkshopRepository
+from events.producer import publish_order_placed
 from observability import set_correlation_id
 from services.messaging.gateway import ConsoleNotificationGateway, NotificationGateway
 
@@ -115,6 +116,20 @@ class OrderCoordinator:
             for draft, sublot_id in zip(drafts, sublot_ids)
             if draft.workshop_id != order_row["factory_workshop_id"]
         ]
+
+    async def reconcile_stuck_orders(self) -> list[int]:
+        """Republish any order still PENDING past the stuck threshold.
+
+        Covers both a lost dual-write publish and a message that reached
+        Kafka but never reached a live, stably-assigned consumer (e.g. a
+        redeploy mid-rebalance) — either way, republishing is safe because
+        on_order_placed's PENDING->ALLOCATING guard makes re-processing a
+        no-op for any order that already moved past PENDING on its own.
+        """
+        stuck = await self._orders.list_stuck_pending(settings.stuck_order_threshold_seconds)
+        for row in stuck:
+            await publish_order_placed(row["order_id"], str(row["correlation_id"]))
+        return [row["order_id"] for row in stuck]
 
     async def on_sublot_assigned(
         self,
