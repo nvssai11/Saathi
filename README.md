@@ -96,6 +96,57 @@ python -m pytest tests/unit/ -v
 python -m pytest tests/integration/ -v
 ```
 
+## Open-Source Attribution
+
+Every third-party library the build directly depends on. "Role" is always
+**direct integration** (used as-is via its public API) unless noted.
+
+### Backend (Python)
+
+| Library | Version | License | Source |
+|---|---|---|---|
+| FastAPI | 0.115.0 | MIT | github.com/fastapi/fastapi |
+| Uvicorn | 0.32.0 | BSD-3-Clause | github.com/encode/uvicorn |
+| asyncpg | 0.30.0 | Apache-2.0 | github.com/MagicStack/asyncpg |
+| aiokafka | 0.11.0 | Apache-2.0 | github.com/aio-libs/aiokafka |
+| google-genai | 2.12.1 | Apache-2.0 | github.com/googleapis/python-genai |
+| LangGraph | 1.2.9 | MIT | github.com/langchain-ai/langgraph |
+| langgraph-checkpoint-postgres | 3.1.0 | MIT | github.com/langchain-ai/langgraph |
+| psycopg (+ psycopg-pool) | 3.3.4 / 3.3.1 | LGPL-3.0-only | github.com/psycopg/psycopg |
+| PuLP | 2.9.0 | MIT | github.com/coin-or/pulp |
+| tenacity | 9.0.0 | Apache-2.0 | github.com/jd/tenacity |
+| Pydantic + pydantic-settings | 2.12.5 / 2.10.1 | MIT | github.com/pydantic/pydantic |
+| python-multipart | 0.0.12 | Apache-2.0 | github.com/Kludex/python-multipart |
+| python-dotenv | 1.0.1 | BSD-3-Clause | github.com/theskumar/python-dotenv |
+| httpx | 0.28.1 | BSD-3-Clause | github.com/encode/httpx |
+| anyio | 4.13.0 | MIT | github.com/agronholm/anyio |
+| pytest | 8.3.0 | MIT | github.com/pytest-dev/pytest — **dev/test tooling only**, not shipped |
+
+### Frontend (JavaScript/TypeScript)
+
+| Library | Version | License | Source |
+|---|---|---|---|
+| React + React DOM | 18.3.1 | MIT | github.com/facebook/react |
+| React Router (react-router-dom) | 6.30.4 | MIT | github.com/remix-run/react-router |
+| i18next + react-i18next | 26.3.6 / 17.0.10 | MIT | github.com/i18next/i18next |
+| Vite + @vitejs/plugin-react | 5.4.21 / 4.7.0 | MIT | github.com/vitejs/vite — **dev tooling only** |
+| TypeScript | 5.9.3 | Apache-2.0 | github.com/microsoft/TypeScript — **dev tooling only** |
+
+### Infrastructure (not embedded code, but leveraged as-is)
+
+| Tool | License | Role |
+|---|---|---|
+| PostgreSQL 16 | PostgreSQL License (permissive) | Primary datastore, hosted via Neon |
+| Apache Kafka | Apache-2.0 | Event bus, hosted via Aiven |
+| Docker / Docker Compose | Apache-2.0 | Local dev environment only |
+
+### Academic / conceptual attribution (not software)
+
+| Source | Role |
+|---|---|
+| Chauhan et al., "Real-time large-scale supplier order assignments across two-tiers of a supply chain," *Computers & Industrial Engineering* 176 (2023) | **Conceptual inspiration** — the allocation engine's MIP formulation is adapted from this paper's model, reimplemented from scratch in `core/allocation/engine.py`. No code was copied; the paper contains no code. |
+
+
 ## Reference
 
 Allocation formulation adapted from Chauhan et al., *"Real-time large-scale supplier order assignments across two-tiers of a supply chain,"* Computers & Industrial Engineering 176 (2023).
