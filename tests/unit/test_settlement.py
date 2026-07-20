@@ -257,3 +257,24 @@ def test_full_delivery_has_no_shortfall_penalty(calculator: SettlementCalculator
     sublot = _sublot(qty_assigned=100, delivered_qty=100, cost_per_unit=Decimal("100.00"))
     result = calculator.compute([sublot], {})
     assert result.payments[0].penalty == Decimal("0.00")
+
+
+def test_compute_balance_due_with_no_advance_owes_full_total():
+    balance = SettlementCalculator.compute_balance_due(
+        buyer_total=Decimal("10000.00"), advance_collected=Decimal("0.00")
+    )
+    assert balance == Decimal("10000.00")
+
+
+def test_compute_balance_due_with_partial_advance():
+    balance = SettlementCalculator.compute_balance_due(
+        buyer_total=Decimal("10000.00"), advance_collected=Decimal("3000.00")
+    )
+    assert balance == Decimal("7000.00")
+
+
+def test_compute_balance_due_negative_is_a_buyer_credit():
+    balance = SettlementCalculator.compute_balance_due(
+        buyer_total=Decimal("4000.00"), advance_collected=Decimal("6000.00")
+    )
+    assert balance == Decimal("-2000.00")

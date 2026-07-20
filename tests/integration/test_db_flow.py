@@ -10,7 +10,9 @@ import pytest
 from config import settings
 from core.domain import PaymentDraft, SettlementResult, SubLotDraft, TrustEvent, VerificationOutput
 from core.exceptions import InvalidStateTransitionError
+from core.settlement.calculator import SettlementCalculator, SettlementConfig
 from core.trust.scorer import TrustScorer, TrustScorerConfig
+from db.repositories.buyer_payment_repository import BuyerPaymentRepository
 from db.repositories.notification_repository import NotificationRepository
 from db.repositories.order_repository import OrderRepository
 from db.repositories.payment_repository import PaymentRepository
@@ -334,6 +336,119 @@ async def test_schema_constraints_enforced(conn: asyncpg.Connection) -> None:
         "SELECT defect_found FROM trust_events WHERE sublot_id = $1 ORDER BY created_at", sublot_id
     )
     assert [r["defect_found"] for r in trust_event_rows] == [False, True]
+
+
+@pytest.mark.anyio
+async def test_buyer_payments_flow(conn: asyncpg.Connection) -> None:
+    orders = OrderRepository(conn)
+    buyer_payments = BuyerPaymentRepository(conn)
+
+    order_id = await orders.create(
+        buyer_ref="buyer-payments-buyer",
+        product_type="jute-door-mat",
+        total_qty=100,
+        quality_min=2,
+        deadline=date(2026, 12, 31),
+        factory_fallback_cost=Decimal("180.00"),
+        factory_workshop_id=99,
+        payment_terms="ADVANCE_PLUS_BALANCE",
+    )
+    assert (await orders.get(order_id))["payment_terms"] == "ADVANCE_PLUS_BALANCE"
+
+    await buyer_payments.create_advance(order_id, Decimal("5670.00"))
+    await buyer_payments.create_advance(order_id, Decimal("9999.00"))  # duplicate, must no-op
+
+    rows = await buyer_payments.get_for_order(order_id)
+    assert len(rows) == 1
+    assert rows[0]["kind"] == "ADVANCE"
+    assert rows[0]["amount"] == Decimal("5670.00")
+    assert rows[0]["status"] == "PENDING"
+    assert rows[0]["paid_at"] is None
+
+    paid = await buyer_payments.mark_paid(order_id, rows[0]["buyer_payment_id"])
+    assert paid["status"] == "PAID"
+    assert paid["paid_at"] is not None
+
+    again = await buyer_payments.mark_paid(order_id, rows[0]["buyer_payment_id"])
+    assert again is None  # already paid, second attempt is a no-op
+
+    await buyer_payments.create_balance(order_id, Decimal("13230.00"))
+    final_rows = await buyer_payments.get_for_order(order_id)
+    assert {r["kind"]: r["amount"] for r in final_rows} == {
+        "ADVANCE": Decimal("5670.00"),
+        "BALANCE": Decimal("13230.00"),
+    }
+
+    await buyer_payments.create_refund(order_id, Decimal("5670.00"))
+    await buyer_payments.create_refund(order_id, Decimal("9999.00"))  # duplicate, must no-op
+    refund_rows = await buyer_payments.get_for_order(order_id)
+    assert {r["kind"]: r["amount"] for r in refund_rows} == {
+        "ADVANCE": Decimal("5670.00"),
+        "BALANCE": Decimal("13230.00"),
+        "REFUND": Decimal("5670.00"),
+    }
+
+
+@pytest.mark.anyio
+async def test_balance_reconciles_correctly_after_factory_fallback_backfill(
+    conn: asyncpg.Connection,
+) -> None:
+    """A workshop under-delivers, the shortfall gets backfilled to the (pricier)
+    factory, and the buyer's ADVANCE_PLUS_BALANCE advance — sized off the
+    100%-factory-cost estimate at order placement — must still reconcile
+    correctly against the real, mixed workshop+factory settlement total."""
+    orders = OrderRepository(conn)
+    sublots = SublotRepository(conn)
+    buyer_payments = BuyerPaymentRepository(conn)
+    calculator = SettlementCalculator(SettlementConfig(
+        platform_fee_percentage=Decimal("0.05"),
+        penalty_non_delivery_percentage=Decimal("0.20"),
+    ))
+
+    order_id = await orders.create(
+        buyer_ref="factory-fallback-buyer",
+        product_type="jute-door-mat",
+        total_qty=100,
+        quality_min=2,
+        deadline=date(2026, 12, 31),
+        factory_fallback_cost=Decimal("180.00"),
+        factory_workshop_id=99,
+        payment_terms="ADVANCE_PLUS_BALANCE",
+    )
+
+    # Advance collected at placement: 100% factory-cost estimate x 5% platform
+    # fee x 30% advance = (100 * 180.00 * 1.05) * 0.30 = 5670.00
+    await buyer_payments.create_advance(order_id, Decimal("5670.00"))
+
+    # Workshop assigned all 100 units but only delivers 75 (shortfall 25) —
+    # the shortfall is backfilled to the factory at its (higher) fallback cost.
+    workshop_sublot_id, factory_sublot_id = await sublots.create_batch(
+        [
+            SubLotDraft(order_id=order_id, workshop_id=1, qty_assigned=100, cost_per_unit=Decimal("90.00")),
+            SubLotDraft(order_id=order_id, workshop_id=99, qty_assigned=25, cost_per_unit=Decimal("180.00")),
+        ],
+        conn=conn,
+    )
+    await sublots.mark_delivered(workshop_sublot_id, delivered_qty=75)
+    await sublots.mark_delivered(factory_sublot_id, delivered_qty=25)
+    await sublots.transition_status(workshop_sublot_id, "VERIFIED")
+    await sublots.transition_status(factory_sublot_id, "VERIFIED")
+
+    sublot_rows = await sublots.list_for_order(order_id)
+    result = calculator.compute(sublot_rows, {})
+
+    # workshop: 75 * 90.00 = 6750.00; factory backfill: 25 * 180.00 = 4500.00
+    assert result.buyer_base == Decimal("11250.00")
+    assert result.platform_fee == Decimal("562.50")
+    assert result.buyer_total == Decimal("11812.50")
+
+    advance_row = (await buyer_payments.get_for_order(order_id))[0]
+    balance = calculator.compute_balance_due(result.buyer_total, Decimal(str(advance_row["amount"])))
+    assert balance == Decimal("6142.50")
+
+    await buyer_payments.create_balance(order_id, balance)
+    final_rows = {r["kind"]: r["amount"] for r in await buyer_payments.get_for_order(order_id)}
+    assert final_rows == {"ADVANCE": Decimal("5670.00"), "BALANCE": Decimal("6142.50")}
 
 
 @pytest.mark.anyio

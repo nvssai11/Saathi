@@ -66,3 +66,20 @@ async def test_handle_message_publishes_nothing_when_no_assignments():
         await worker._handle_message({"order_id": 42})
 
     mock_publish.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_handle_message_one_failed_publish_does_not_block_the_rest():
+    coordinator = AsyncMock()
+    coordinator.on_order_placed.return_value = [
+        SublotAssignment(sublot_id=1, order_id=42, workshop_id=7, product_type="kurta", qty_assigned=60),
+        SublotAssignment(sublot_id=2, order_id=42, workshop_id=8, product_type="kurta", qty_assigned=40),
+    ]
+    worker = AllocationWorker(coordinator)
+
+    mock_publish = AsyncMock(side_effect=[RuntimeError("kafka unavailable"), None])
+    with patch("workers.allocation_worker.publish_sublot_assigned", new=mock_publish):
+        await worker._handle_message({"order_id": 42})
+
+    assert mock_publish.await_count == 2
+    mock_publish.assert_any_await(sublot_id=2, order_id=42, workshop_id=8, product_type="kurta", qty_assigned=40)

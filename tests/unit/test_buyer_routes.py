@@ -9,6 +9,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from api.dependencies import (
+    buyer_payment_repo,
     get_coordinator,
     order_repo,
     payment_repo,
@@ -34,7 +35,10 @@ client = TestClient(app)
 @pytest.fixture(autouse=True)
 def _reset_overrides():
     yield
-    for dep in (order_repo, payment_repo, get_coordinator, sublot_repo, verification_repo, workshop_repo):
+    for dep in (
+        order_repo, payment_repo, get_coordinator, sublot_repo, verification_repo,
+        workshop_repo, buyer_payment_repo,
+    ):
         app.dependency_overrides.pop(dep, None)
     app.dependency_overrides[require_buyer] = lambda: None
 
@@ -68,6 +72,7 @@ def test_place_order_422_when_no_factory_for_product_type():
     workshops.get_factory.return_value = None
     app.dependency_overrides[workshop_repo] = lambda: workshops
     app.dependency_overrides[order_repo] = lambda: AsyncMock()
+    app.dependency_overrides[get_coordinator] = lambda: AsyncMock()
 
     response = client.post(
         "/orders",
@@ -90,6 +95,9 @@ def test_place_order_201_happy_path_creates_publishes_and_returns_correlation_id
     orders.get.return_value = {"correlation_id": "corr-xyz"}
     app.dependency_overrides[order_repo] = lambda: orders
 
+    coordinator = AsyncMock()
+    app.dependency_overrides[get_coordinator] = lambda: coordinator
+
     with patch("api.routes.buyer.publish_order_placed", new=AsyncMock()) as mock_publish:
         response = client.post(
             "/orders",
@@ -106,7 +114,9 @@ def test_place_order_201_happy_path_creates_publishes_and_returns_correlation_id
     orders.create.assert_awaited_once_with(
         buyer_ref="buyer-1", product_type="kurta", total_qty=100, quality_min=2,
         deadline=date(2099, 1, 1), factory_fallback_cost=Decimal("180.00"), factory_workshop_id=99,
+        payment_terms="PAY_ON_DELIVERY",
     )
+    coordinator.create_advance_payment.assert_awaited_once_with(42)
     mock_publish.assert_awaited_once_with(42, "corr-xyz")
 
 
@@ -114,6 +124,7 @@ def test_place_order_rejects_past_deadline():
     workshops = AsyncMock()
     app.dependency_overrides[workshop_repo] = lambda: workshops
     app.dependency_overrides[order_repo] = lambda: AsyncMock()
+    app.dependency_overrides[get_coordinator] = lambda: AsyncMock()
 
     response = client.post(
         "/orders",
@@ -189,6 +200,7 @@ def test_cancel_order_404_when_missing():
     app.dependency_overrides[order_repo] = lambda: _mock_orders(None)
     app.dependency_overrides[sublot_repo] = lambda: AsyncMock()
     app.dependency_overrides[workshop_repo] = lambda: AsyncMock()
+    app.dependency_overrides[get_coordinator] = lambda: AsyncMock()
 
     response = client.delete("/orders/999")
 
@@ -201,6 +213,7 @@ def test_cancel_order_409_when_invalid_transition():
     app.dependency_overrides[order_repo] = lambda: orders
     app.dependency_overrides[sublot_repo] = lambda: AsyncMock()
     app.dependency_overrides[workshop_repo] = lambda: AsyncMock()
+    app.dependency_overrides[get_coordinator] = lambda: AsyncMock()
 
     response = client.delete("/orders/1")
 
@@ -222,6 +235,9 @@ def test_cancel_order_204_releases_capacity_per_sublot():
     workshops = AsyncMock()
     app.dependency_overrides[workshop_repo] = lambda: workshops
 
+    coordinator = AsyncMock()
+    app.dependency_overrides[get_coordinator] = lambda: coordinator
+
     response = client.delete("/orders/1")
 
     assert response.status_code == 204
@@ -230,6 +246,7 @@ def test_cancel_order_204_releases_capacity_per_sublot():
     workshops.release_capacity.assert_any_call(2, "kurta", 20)
     assert workshops.release_capacity.await_count == 2
     sublots.cancel_for_order.assert_awaited_once_with(1)
+    coordinator.create_cancellation_refund.assert_awaited_once_with(1)
 
 def test_list_orders_returns_paginated_response():
     orders = AsyncMock()
@@ -514,6 +531,97 @@ def test_defect_photo_200_serves_the_actual_file(tmp_path):
     assert response.content == b"\x89PNG\r\n\x1a\nfake-png-bytes"
 
 
+def test_get_payments_404_when_order_missing():
+    app.dependency_overrides[order_repo] = lambda: _mock_orders(None)
+    app.dependency_overrides[buyer_payment_repo] = lambda: AsyncMock()
+
+    response = client.get("/orders/999/payments")
+
+    assert response.status_code == 404
+
+
+def test_get_payments_200_lists_advance_and_balance():
+    app.dependency_overrides[order_repo] = lambda: _mock_orders({
+        "correlation_id": "corr-1", "payment_terms": "ADVANCE_PLUS_BALANCE",
+    })
+    buyer_payments = AsyncMock()
+    buyer_payments.get_for_order.return_value = [
+        {
+            "buyer_payment_id": 1, "kind": "ADVANCE", "amount": Decimal("3000.00"),
+            "status": "PENDING", "created_at": datetime(2026, 7, 1, 12, 0), "paid_at": None,
+        },
+    ]
+    app.dependency_overrides[buyer_payment_repo] = lambda: buyer_payments
+
+    response = client.get("/orders/1/payments")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["payment_terms"] == "ADVANCE_PLUS_BALANCE"
+    assert body["items"][0]["kind"] == "ADVANCE"
+    assert body["items"][0]["amount"] == "3000.00"
+    assert body["items"][0]["status"] == "PENDING"
+
+
+def test_pay_payment_404_when_order_missing():
+    app.dependency_overrides[order_repo] = lambda: _mock_orders(None)
+    app.dependency_overrides[buyer_payment_repo] = lambda: AsyncMock()
+
+    response = client.post("/orders/999/payments/1/pay")
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "ORDER_NOT_FOUND"
+
+
+def test_pay_payment_404_when_payment_missing():
+    app.dependency_overrides[order_repo] = lambda: _mock_orders({"correlation_id": "corr-1"})
+    buyer_payments = AsyncMock()
+    buyer_payments.mark_paid.return_value = None
+    buyer_payments.get_for_order.return_value = []
+    app.dependency_overrides[buyer_payment_repo] = lambda: buyer_payments
+
+    response = client.post("/orders/1/payments/999/pay")
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "PAYMENT_NOT_FOUND"
+
+
+def test_pay_payment_409_when_already_paid():
+    app.dependency_overrides[order_repo] = lambda: _mock_orders({"correlation_id": "corr-1"})
+    buyer_payments = AsyncMock()
+    buyer_payments.mark_paid.return_value = None
+    buyer_payments.get_for_order.return_value = [
+        {
+            "buyer_payment_id": 1, "kind": "ADVANCE", "amount": Decimal("3000.00"),
+            "status": "PAID", "created_at": datetime(2026, 7, 1), "paid_at": datetime(2026, 7, 2),
+        },
+    ]
+    app.dependency_overrides[buyer_payment_repo] = lambda: buyer_payments
+
+    response = client.post("/orders/1/payments/1/pay")
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "ALREADY_PAID"
+
+
+def test_pay_payment_200_marks_paid():
+    app.dependency_overrides[order_repo] = lambda: _mock_orders({"correlation_id": "corr-1"})
+    buyer_payments = AsyncMock()
+    buyer_payments.mark_paid.return_value = {
+        "buyer_payment_id": 1, "kind": "ADVANCE", "amount": Decimal("3000.00"),
+        "status": "PAID", "created_at": datetime(2026, 7, 1), "paid_at": datetime(2026, 7, 2),
+    }
+    app.dependency_overrides[buyer_payment_repo] = lambda: buyer_payments
+
+    response = client.post("/orders/1/payments/1/pay")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "PAID"
+    assert body["amount"] == "3000.00"
+    buyer_payments.mark_paid.assert_awaited_once_with(1, 1)
+
+
 def test_cancel_order_sets_correlation_id_header_even_on_204():
     app.dependency_overrides[order_repo] = lambda: _mock_orders({
         "status": "PENDING", "correlation_id": "corr-cancel", "product_type": "kurta",
@@ -526,6 +634,7 @@ def test_cancel_order_sets_correlation_id_header_even_on_204():
     sublots.list_for_order.return_value = []
     app.dependency_overrides[sublot_repo] = lambda: sublots
     app.dependency_overrides[workshop_repo] = lambda: AsyncMock()
+    app.dependency_overrides[get_coordinator] = lambda: AsyncMock()
 
     response = client.delete("/orders/1")
 

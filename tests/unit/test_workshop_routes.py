@@ -134,6 +134,7 @@ def test_list_my_sublots_includes_product_type_and_deadline():
         },
     ]
     app.dependency_overrides[sublot_repo] = lambda: sublots
+    app.dependency_overrides[workshop_repo] = lambda: AsyncMock()
 
     response = client.get("/workshop/sublots")
 
@@ -154,6 +155,7 @@ def test_list_my_sublots_surfaces_failure_explanation():
         },
     ]
     app.dependency_overrides[sublot_repo] = lambda: sublots
+    app.dependency_overrides[workshop_repo] = lambda: AsyncMock()
 
     response = client.get("/workshop/sublots")
 
@@ -234,6 +236,7 @@ def test_mark_delivered_404_when_sublot_missing():
     sublots = AsyncMock()
     sublots.get.return_value = None
     app.dependency_overrides[sublot_repo] = lambda: sublots
+    app.dependency_overrides[workshop_repo] = lambda: AsyncMock()
 
     response = client.post("/workshop/sublots/1/deliver", json={"delivered_qty": 50})
 
@@ -244,6 +247,7 @@ def test_mark_delivered_403_when_wrong_workshop():
     sublots = AsyncMock()
     sublots.get.return_value = _make_sublot(workshop_id=2, status="ASSIGNED")
     app.dependency_overrides[sublot_repo] = lambda: sublots
+    app.dependency_overrides[workshop_repo] = lambda: AsyncMock()
 
     response = client.post("/workshop/sublots/1/deliver", json={"delivered_qty": 50})
 
@@ -254,6 +258,7 @@ def test_mark_delivered_409_when_already_past_deliverable_state():
     sublots = AsyncMock()
     sublots.get.return_value = _make_sublot(workshop_id=1, status="VERIFIED")
     app.dependency_overrides[sublot_repo] = lambda: sublots
+    app.dependency_overrides[workshop_repo] = lambda: AsyncMock()
 
     response = client.post("/workshop/sublots/1/deliver", json={"delivered_qty": 50})
 
@@ -265,6 +270,7 @@ def test_mark_delivered_409_when_delivered_qty_exceeds_assigned():
     sublots.get.return_value = _make_sublot(workshop_id=1, status="ASSIGNED", qty_assigned=50)
     sublots.mark_delivered = AsyncMock()
     app.dependency_overrides[sublot_repo] = lambda: sublots
+    app.dependency_overrides[workshop_repo] = lambda: AsyncMock()
 
     response = client.post("/workshop/sublots/1/deliver", json={"delivered_qty": 51})
 
@@ -277,6 +283,9 @@ def test_mark_delivered_202_happy_path_writes_db_then_publishes_kafka():
     sublots.get.return_value = _make_sublot(sublot_id=1, order_id=10, workshop_id=1, status="ASSIGNED")
     sublots.mark_delivered = AsyncMock()
     app.dependency_overrides[sublot_repo] = lambda: sublots
+    workshops = AsyncMock()
+    workshops.is_factory.return_value = False
+    app.dependency_overrides[workshop_repo] = lambda: workshops
 
     with patch("api.routes.workshop.publish_sublot_delivered", new=AsyncMock()) as mock_publish:
         response = client.post("/workshop/sublots/1/deliver", json={"delivered_qty": 40})
@@ -285,6 +294,37 @@ def test_mark_delivered_202_happy_path_writes_db_then_publishes_kafka():
     assert response.json() == {"sublot_id": 1, "delivered_qty": 40}
     sublots.mark_delivered.assert_awaited_once_with(1, 40)
     mock_publish.assert_awaited_once_with(1, 10, 40)
+
+
+def test_mark_delivered_409_when_factory_delivers_partial():
+    sublots = AsyncMock()
+    sublots.get.return_value = _make_sublot(sublot_id=1, order_id=10, workshop_id=1, status="ASSIGNED", qty_assigned=50)
+    sublots.mark_delivered = AsyncMock()
+    app.dependency_overrides[sublot_repo] = lambda: sublots
+    workshops = AsyncMock()
+    workshops.is_factory.return_value = True
+    app.dependency_overrides[workshop_repo] = lambda: workshops
+
+    response = client.post("/workshop/sublots/1/deliver", json={"delivered_qty": 40})
+
+    assert response.status_code == 409
+    sublots.mark_delivered.assert_not_awaited()
+
+
+def test_mark_delivered_202_when_factory_delivers_full_qty():
+    sublots = AsyncMock()
+    sublots.get.return_value = _make_sublot(sublot_id=1, order_id=10, workshop_id=1, status="ASSIGNED", qty_assigned=50)
+    sublots.mark_delivered = AsyncMock()
+    app.dependency_overrides[sublot_repo] = lambda: sublots
+    workshops = AsyncMock()
+    workshops.is_factory.return_value = True
+    app.dependency_overrides[workshop_repo] = lambda: workshops
+
+    with patch("api.routes.workshop.publish_sublot_delivered", new=AsyncMock()):
+        response = client.post("/workshop/sublots/1/deliver", json={"delivered_qty": 50})
+
+    assert response.status_code == 202
+    sublots.mark_delivered.assert_awaited_once_with(1, 50)
 
 def test_start_production_404_when_sublot_missing():
     sublots = AsyncMock()

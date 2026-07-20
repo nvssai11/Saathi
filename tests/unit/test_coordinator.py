@@ -21,6 +21,7 @@ def _make_order_row(
     factory_fallback_cost: Decimal = Decimal("150.00"),
     factory_workshop_id: int = 99,
     correlation_id: str = "test-correlation-id",
+    payment_terms: str = "PAY_ON_DELIVERY",
 ) -> dict:
     return {
         "status": status,
@@ -31,6 +32,7 @@ def _make_order_row(
         "factory_fallback_cost": factory_fallback_cost,
         "factory_workshop_id": factory_workshop_id,
         "correlation_id": correlation_id,
+        "payment_terms": payment_terms,
     }
 
 
@@ -72,6 +74,7 @@ def _make_coordinator(**overrides) -> OrderCoordinator:
         settlement_calculator=MagicMock(),
         verification_agent=verification_agent,
         notification_gateway=AsyncMock(),
+        buyer_payment_repo=AsyncMock(),
     )
     defaults.update(overrides)
     return OrderCoordinator(**defaults)
@@ -1125,6 +1128,148 @@ async def test_check_terminal_both_transitions_fail_skips_settlement():
 
     coord._settlement.compute.assert_not_called()
     coord._payments.save_settlement.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_create_advance_payment_noop_for_pay_on_delivery():
+    coord = _make_coordinator()
+    coord._orders.get = AsyncMock(return_value=_make_order_row(payment_terms="PAY_ON_DELIVERY"))
+
+    await coord.create_advance_payment(order_id=1)
+
+    coord._buyer_payments.create_advance.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_create_advance_payment_noop_when_order_not_found():
+    coord = _make_coordinator()
+    coord._orders.get = AsyncMock(return_value=None)
+
+    await coord.create_advance_payment(order_id=1)
+
+    coord._buyer_payments.create_advance.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_create_advance_payment_full_amount_for_pay_upfront():
+    coord = _make_coordinator()
+    coord._orders.get = AsyncMock(return_value=_make_order_row(
+        payment_terms="PAY_UPFRONT", total_qty=100, factory_fallback_cost=Decimal("150.00"),
+    ))
+
+    await coord.create_advance_payment(order_id=1)
+
+    # 100 * 150.00 = 15000.00, +5% platform fee = 15750.00, 100% upfront
+    coord._buyer_payments.create_advance.assert_called_once_with(1, Decimal("15750.00"))
+
+
+@pytest.mark.anyio
+async def test_create_advance_payment_configured_percentage_for_advance_plus_balance():
+    coord = _make_coordinator()
+    coord._orders.get = AsyncMock(return_value=_make_order_row(
+        payment_terms="ADVANCE_PLUS_BALANCE", total_qty=100, factory_fallback_cost=Decimal("150.00"),
+    ))
+
+    await coord.create_advance_payment(order_id=1)
+
+    # estimate 15750.00 * settings.settlement_advance_percentage (0.30) = 4725.00
+    expected = (Decimal("15750.00") * settings.settlement_advance_percentage).quantize(Decimal("0.01"))
+    coord._buyer_payments.create_advance.assert_called_once_with(1, expected)
+
+
+@pytest.mark.anyio
+async def test_create_cancellation_refund_noop_for_pay_on_delivery():
+    coord = _make_coordinator()
+    coord._orders.get = AsyncMock(return_value=_make_order_row(payment_terms="PAY_ON_DELIVERY"))
+
+    await coord.create_cancellation_refund(order_id=1)
+
+    coord._buyer_payments.create_refund.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_create_cancellation_refund_noop_when_order_not_found():
+    coord = _make_coordinator()
+    coord._orders.get = AsyncMock(return_value=None)
+
+    await coord.create_cancellation_refund(order_id=1)
+
+    coord._buyer_payments.create_refund.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_create_cancellation_refund_noop_when_no_paid_advance():
+    coord = _make_coordinator()
+    coord._orders.get = AsyncMock(return_value=_make_order_row(payment_terms="ADVANCE_PLUS_BALANCE"))
+    coord._buyer_payments.get_for_order = AsyncMock(
+        return_value=[{"kind": "ADVANCE", "amount": Decimal("3000.00"), "status": "PENDING"}]
+    )
+
+    await coord.create_cancellation_refund(order_id=1)
+
+    coord._buyer_payments.create_refund.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_create_cancellation_refund_creates_refund_for_paid_advance():
+    coord = _make_coordinator()
+    coord._orders.get = AsyncMock(return_value=_make_order_row(payment_terms="PAY_UPFRONT"))
+    coord._buyer_payments.get_for_order = AsyncMock(
+        return_value=[{"kind": "ADVANCE", "amount": Decimal("15750.00"), "status": "PAID"}]
+    )
+
+    await coord.create_cancellation_refund(order_id=1)
+
+    coord._buyer_payments.create_refund.assert_called_once_with(1, Decimal("15750.00"))
+
+
+@pytest.mark.anyio
+async def test_settle_skips_buyer_payments_for_pay_on_delivery():
+    coord = _make_coordinator()
+    coord._sublots.all_terminal = AsyncMock(return_value=True)
+    coord._orders.transition_status = AsyncMock()
+    coord._orders.get = AsyncMock(return_value=_make_order_row(payment_terms="PAY_ON_DELIVERY"))
+    coord._sublots.list_for_order = AsyncMock(return_value=[_make_sublot_row()])
+    coord._verifications.get_for_order = AsyncMock(return_value={})
+
+    result = MagicMock()
+    result.buyer_total = Decimal("5250.00")
+    result.platform_fee = Decimal("250.00")
+    coord._settlement.compute = MagicMock(return_value=result)
+    coord._payments.save_settlement = AsyncMock()
+
+    await coord._check_terminal_and_settle(order_id=1)
+
+    coord._buyer_payments.create_balance.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_settle_creates_balance_payment_for_advance_plus_balance():
+    coord = _make_coordinator()
+    coord._sublots.all_terminal = AsyncMock(return_value=True)
+    coord._orders.transition_status = AsyncMock()
+    coord._orders.get = AsyncMock(
+        return_value=_make_order_row(payment_terms="ADVANCE_PLUS_BALANCE")
+    )
+    coord._sublots.list_for_order = AsyncMock(return_value=[_make_sublot_row()])
+    coord._verifications.get_for_order = AsyncMock(return_value={})
+    coord._buyer_payments.get_for_order = AsyncMock(
+        return_value=[{"kind": "ADVANCE", "amount": Decimal("3000.00")}]
+    )
+
+    result = MagicMock()
+    result.buyer_total = Decimal("10000.00")
+    result.platform_fee = Decimal("500.00")
+    coord._settlement.compute = MagicMock(return_value=result)
+    coord._settlement.compute_balance_due = MagicMock(return_value=Decimal("7000.00"))
+    coord._payments.save_settlement = AsyncMock()
+
+    await coord._check_terminal_and_settle(order_id=1)
+
+    coord._settlement.compute_balance_due.assert_called_once_with(
+        Decimal("10000.00"), Decimal("3000.00")
+    )
+    coord._buyer_payments.create_balance.assert_called_once_with(1, Decimal("7000.00"))
 
 @pytest.mark.anyio
 async def test_defect_flagged_order_not_found_raises():
