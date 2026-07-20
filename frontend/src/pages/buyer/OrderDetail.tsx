@@ -345,16 +345,17 @@ export default function OrderDetail() {
           <div className="card">
             <h2>{t("orderDetail.paymentsTitle")}</h2>
             {payments.items.map((item) => {
-              const isCredit = item.kind === "BALANCE" && Number(item.amount) < 0;
+              const negativeBalance = item.kind === "BALANCE" && Number(item.amount) < 0;
+              const isRefund = item.kind === "REFUND" || negativeBalance;
               const kindLabel =
                 item.kind === "ADVANCE"
                   ? payments.payment_terms === "PAY_UPFRONT"
                     ? t("orderDetail.paymentKindUpfront")
                     : t("orderDetail.paymentKindAdvance")
-                  : isCredit
+                  : isRefund
                   ? t("orderDetail.paymentKindRefund")
                   : t("orderDetail.paymentKindBalance");
-              const displayAmount = isCredit
+              const displayAmount = negativeBalance
                 ? (-Number(item.amount)).toFixed(2)
                 : item.amount;
               return (
@@ -367,7 +368,7 @@ export default function OrderDetail() {
                         ? t("orderDetail.paymentStatusPaid")
                         : t("orderDetail.paymentStatusPending")}
                     </span>
-                    {item.status === "PENDING" && !isCredit && (
+                    {item.status === "PENDING" && !isRefund && order.status !== "Cancelled" && (
                       <button
                         className="btn btn-primary btn-sm"
                         onClick={() => handlePay(item.buyer_payment_id)}

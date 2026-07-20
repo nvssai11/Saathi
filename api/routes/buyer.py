@@ -373,6 +373,7 @@ async def cancel_order(
     orders: OrderRepository = Depends(order_repo),
     sublots: SublotRepository = Depends(sublot_repo),
     workshops: WorkshopRepository = Depends(workshop_repo),
+    coordinator: OrderCoordinator = Depends(get_coordinator),
 ):
     order_row = await orders.get(order_id)
     if order_row is None:
@@ -390,3 +391,4 @@ async def cancel_order(
             s.workshop_id, order_row["product_type"], s.qty_assigned
         )
     await sublots.cancel_for_order(order_id)
+    await coordinator.create_cancellation_refund(order_id)

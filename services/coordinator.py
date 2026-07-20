@@ -90,6 +90,20 @@ class OrderCoordinator:
         fee = (base * settings.platform_fee_percentage).quantize(Decimal("0.01"))
         return (base + fee).quantize(Decimal("0.01"))
 
+    async def create_cancellation_refund(self, order_id: int) -> None:
+        order_row = await self._orders.get(order_id)
+        if order_row is None or order_row["payment_terms"] == "PAY_ON_DELIVERY":
+            return
+
+        existing = await self._buyer_payments.get_for_order(order_id)
+        paid_advance = next(
+            (p for p in existing if p["kind"] == "ADVANCE" and p["status"] == "PAID"), None
+        )
+        if paid_advance is None:
+            return
+
+        await self._buyer_payments.create_refund(order_id, Decimal(str(paid_advance["amount"])))
+
     async def on_order_placed(self, order_id: int) -> list[SublotAssignment]:
         logger.info("on_order_placed order_id=%d", order_id)
 

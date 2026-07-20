@@ -195,10 +195,10 @@ export default function BulkOrderSheet({ item, onClose, onSubmit }: BulkOrderShe
                   aria-pressed={paymentTerms === opt.value}
                   onClick={() => setPaymentTerms(opt.value)}
                 >
-                  <span className="tier-label">{t(`bulkOrder.${opt.label}`)}</span>
-                  <span className="tier-blurb">
-                    {t(`bulkOrder.${opt.blurb}`, { pct: ADVANCE_PERCENTAGE })}
+                  <span className="tier-label">
+                    {t(`bulkOrder.${opt.label}`, { pct: ADVANCE_PERCENTAGE })}
                   </span>
+                  <span className="tier-blurb">{t(`bulkOrder.${opt.blurb}`)}</span>
                 </button>
               ))}
             </div>

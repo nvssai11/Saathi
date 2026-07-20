@@ -52,7 +52,8 @@ CREATE TYPE payment_terms AS ENUM (
 
 CREATE TYPE buyer_payment_kind AS ENUM (
     'ADVANCE',
-    'BALANCE'
+    'BALANCE',
+    'REFUND'
 );
 
 CREATE TYPE buyer_payment_status AS ENUM (

@@ -29,6 +29,16 @@ class BuyerPaymentRepository:
             order_id, amount,
         )
 
+    async def create_refund(self, order_id: int, amount: Decimal) -> None:
+        await self._pool.execute(
+            """
+            INSERT INTO buyer_payments (order_id, kind, amount)
+            VALUES ($1, 'REFUND', $2)
+            ON CONFLICT (order_id, kind) DO NOTHING
+            """,
+            order_id, amount,
+        )
+
     async def get_for_order(self, order_id: int) -> list[asyncpg.Record]:
         return await self._pool.fetch(
             "SELECT * FROM buyer_payments WHERE order_id = $1 ORDER BY created_at",

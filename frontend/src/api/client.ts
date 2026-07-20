@@ -168,7 +168,7 @@ export interface SettlementSummaryResponse {
 
 export interface BuyerPaymentItem {
   buyer_payment_id: number;
-  kind: "ADVANCE" | "BALANCE";
+  kind: "ADVANCE" | "BALANCE" | "REFUND";
   amount: string;
   status: "PENDING" | "PAID";
   created_at: string;
